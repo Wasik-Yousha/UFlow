@@ -91,11 +91,18 @@ macOS puts a quarantine flag on anything a browser downloads, and Gatekeeper won
 
 </details>
 
-If you'd rather use the download button: grab the `.dmg`, drag UFlow to Applications, try to open it, get refused, Click Done. ⚠️ Not "Move to Trash" — Apple styles the destructive button green and makes it the visually obvious one.
+If you'd rather use the download button: grab the `.dmg`, drag UFlow to Applications, try to open it, get refused, Click Done.
+
+⚠️ Not "Move to Trash" — Apple styles the destructive button green and makes it the visually obvious one.
+
 Open System Settings → Privacy & Security
+
 Scroll down to Security. There'll be a line saying "UFlow" was blocked to protect your Mac
+
 Click Open Anyway, then authenticate
+
 Launch UFlow again — it opens, and never asks again
+
 Or skip all of that from a terminal:
 
 ```sh
