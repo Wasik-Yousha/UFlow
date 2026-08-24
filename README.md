@@ -24,6 +24,58 @@ were already in. Everything runs on-device.
   level meter and elapsed time.
 - Light and dark, switchable in Settings independently of macOS.
 
+## Install
+
+**One line, no warnings:**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/scripts/install.sh | bash
+```
+
+This downloads the latest release, installs it to `/Applications`, and opens
+it. macOS attaches a quarantine flag to *browser* downloads and Gatekeeper
+refuses to open an app carrying one unless Apple has notarized it — `curl`
+does not set that flag, so this route just works.
+
+**Or download the `.dmg`** from the Releases page and drag UFlow to
+Applications. That path *does* get quarantined, so see below.
+
+## Opening a downloaded .dmg
+
+UFlow is signed with a self-signed certificate rather than an Apple Developer
+ID, and it is not notarized, so a browser-downloaded copy is blocked on first
+open. The image ships a `Read Me First.txt` saying the same thing. Two ways
+past it:
+
+**Either** — try to open UFlow once, then go to **System Settings ▸ Privacy &
+Security**, scroll down, and click **Open Anyway** next to the message about
+UFlow.
+
+**Or** — clear the quarantine flag yourself:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/UFlow.app
+```
+
+On recent macOS versions right-click ▸ Open no longer works for unnotarized
+apps, so use one of those two — or the `curl` line above, which avoids the
+situation entirely.
+
+To remove this friction properly you need an
+[Apple Developer Program](https://developer.apple.com/programs/) membership
+(currently $99/year), which gets you a Developer ID certificate. Then sign and
+notarize:
+
+```sh
+codesign --force --deep --options runtime \
+         --entitlements YouFlow/Sources/YouFlow.entitlements \
+         --sign "Developer ID Application: YOUR NAME (TEAMID)" /Applications/UFlow.app
+xcrun notarytool submit dist/UFlow-1.0.dmg --keychain-profile "AC_PASSWORD" --wait
+xcrun stapler staple dist/UFlow-1.0.dmg
+```
+
+After that the `.dmg` opens on any Mac with no warnings.
+
 ## The dictionary
 
 Two kinds of entry:
@@ -109,58 +161,6 @@ These are tied to the app's code signature. Rebuilding with a *different*
 signing identity makes macOS treat it as a new app, and you will be asked
 again — remove the stale entry in System Settings ▸ Privacy & Security if it
 starts refusing.
-
-## Install
-
-**One line, no warnings:**
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/scripts/install.sh | bash
-```
-
-This downloads the latest release, installs it to `/Applications`, and opens
-it. macOS attaches a quarantine flag to *browser* downloads and Gatekeeper
-refuses to open an app carrying one unless Apple has notarized it — `curl`
-does not set that flag, so this route just works.
-
-**Or download the `.dmg`** from the Releases page and drag UFlow to
-Applications. That path *does* get quarantined, so see below.
-
-## Opening a downloaded .dmg
-
-UFlow is signed with a self-signed certificate rather than an Apple Developer
-ID, and it is not notarized, so a browser-downloaded copy is blocked on first
-open. The image ships a `Read Me First.txt` saying the same thing. Two ways
-past it:
-
-**Either** — try to open UFlow once, then go to **System Settings ▸ Privacy &
-Security**, scroll down, and click **Open Anyway** next to the message about
-UFlow.
-
-**Or** — clear the quarantine flag yourself:
-
-```sh
-xattr -dr com.apple.quarantine /Applications/UFlow.app
-```
-
-On recent macOS versions right-click ▸ Open no longer works for unnotarized
-apps, so use one of those two — or the `curl` line above, which avoids the
-situation entirely.
-
-To remove this friction properly you need an
-[Apple Developer Program](https://developer.apple.com/programs/) membership
-(currently $99/year), which gets you a Developer ID certificate. Then sign and
-notarize:
-
-```sh
-codesign --force --deep --options runtime \
-         --entitlements YouFlow/Sources/YouFlow.entitlements \
-         --sign "Developer ID Application: YOUR NAME (TEAMID)" /Applications/UFlow.app
-xcrun notarytool submit dist/UFlow-1.0.dmg --keychain-profile "AC_PASSWORD" --wait
-xcrun stapler staple dist/UFlow-1.0.dmg
-```
-
-After that the `.dmg` opens on any Mac with no warnings.
 
 ## Design
 
