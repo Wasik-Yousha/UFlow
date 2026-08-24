@@ -120,7 +120,7 @@ Or just open the project in Xcode and hit Run.
 
 ## How it was built
 
-The engine came together with a DeepSeek harness driving the **Ox Alpha** model through OpenRouter. The interface layer, the design system and most of the debugging happened in [Claude Code](https://claude.com/claude-code).
+Built with a **DeepSeek harness** driving the **Ox Alpha** model through **[OpenRouter](https://openrouter.ai)**, and debugged with **[Claude Code](https://claude.com/claude-code)**.
 
 Every colour, size, duration and sound in the app comes out of one file, [`DesignTokens.swift`](YouFlow/Sources/DesignTokens.swift). Views read from `Tok.*` and nothing hardcodes a hex value. The brand colours are sampled from the app icon rather than picked by eye — vermilion `#D5391B`, teal `#0A444F`, amber `#E88E14`, cream `#FDF1D3` — and the chassis colours came out of the reference images the same way.
 
@@ -166,3 +166,7 @@ YouFlow/Sources/
 Light and dark, switchable in Settings independently of the system:
 
 <img src="docs/window-dark.png" width="820" alt="">
+
+---
+
+<sub>Built with a DeepSeek harness driving the Ox Alpha model through OpenRouter · debugged with Claude Code</sub>
