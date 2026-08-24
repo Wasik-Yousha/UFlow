@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- App Sandbox is intentionally NOT enabled. -->
+	<!-- Hardened runtime: permit loading the debug dylib signed by our
+	     self-signed development certificate (no Team ID). -->
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+	<!-- Required under hardened runtime: without this tccd refuses to even
+	     raise the microphone prompt ("Policy disallows prompt"), so the app
+	     never appears in System Settings › Privacy › Microphone. -->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+</dict>
+</plist>

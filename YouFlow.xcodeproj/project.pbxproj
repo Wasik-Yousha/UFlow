@@ -1,0 +1,371 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10000000000000000000001 /* DictationApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* DictationApp.swift */; };
+		A10000000000000000000002 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* AppState.swift */; };
+		A10000000000000000000003 /* PermissionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003 /* PermissionManager.swift */; };
+		A10000000000000000000004 /* HotkeyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000004 /* HotkeyManager.swift */; };
+		A10000000000000000000005 /* SpeechEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000005 /* SpeechEngine.swift */; };
+		A10000000000000000000006 /* HUDPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* HUDPanel.swift */; };
+		A10000000000000000000007 /* ClipboardInjector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* ClipboardInjector.swift */; };
+		A10000000000000000000008 /* StatusBarController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* StatusBarController.swift */; };
+		A10000000000000000000009 /* TranscriptProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000009 /* TranscriptProcessor.swift */; };
+		A1000000000000000000000A /* Logging.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000A /* Logging.swift */; };
+		A1000000000000000000000B /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000030 /* DesignTokens.swift */; };
+		A1000000000000000000000C /* Persistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000031 /* Persistence.swift */; };
+		A1000000000000000000000D /* SoundKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000D /* SoundKit.swift */; };
+		A1000000000000000000000E /* Components.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000E /* Components.swift */; };
+		A1000000000000000000000F /* DeckView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000F /* DeckView.swift */; };
+		A10000000000000000000010 /* TranscriptionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000010 /* TranscriptionsView.swift */; };
+		A10000000000000000000011 /* DictionaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011 /* DictionaryView.swift */; };
+		A10000000000000000000012 /* MainWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000012 /* MainWindowView.swift */; };
+		A10000000000000000000013 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000013 /* SettingsView.swift */; };
+		A10000000000000000000014 /* AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000014 /* AppIcon.icns */; };
+		A10000000000000000000015 /* LogoMark.png in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000015 /* LogoMark.png */; };
+		A10000000000000000000016 /* NamePlate.png in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000016 /* NamePlate.png */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A30000000000000000000001 /* UFlow.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = UFlow.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000000000000000000001 /* DictationApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationApp.swift; sourceTree = "<group>"; };
+		A20000000000000000000002 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		A20000000000000000000003 /* PermissionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionManager.swift; sourceTree = "<group>"; };
+		A20000000000000000000004 /* HotkeyManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyManager.swift; sourceTree = "<group>"; };
+		A20000000000000000000005 /* SpeechEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechEngine.swift; sourceTree = "<group>"; };
+		A20000000000000000000006 /* HUDPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HUDPanel.swift; sourceTree = "<group>"; };
+		A20000000000000000000007 /* ClipboardInjector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardInjector.swift; sourceTree = "<group>"; };
+		A20000000000000000000008 /* StatusBarController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarController.swift; sourceTree = "<group>"; };
+		A20000000000000000000009 /* TranscriptProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptProcessor.swift; sourceTree = "<group>"; };
+		A2000000000000000000000A /* Logging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logging.swift; sourceTree = "<group>"; };
+		A2000000000000000000000B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A2000000000000000000000C /* YouFlow.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = YouFlow.entitlements; sourceTree = "<group>"; };
+		A20000000000000000000030 /* DesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignTokens.swift; sourceTree = "<group>"; };
+		A20000000000000000000031 /* Persistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Persistence.swift; sourceTree = "<group>"; };
+		A2000000000000000000000D /* SoundKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoundKit.swift; sourceTree = "<group>"; };
+		A2000000000000000000000E /* Components.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components.swift; sourceTree = "<group>"; };
+		A2000000000000000000000F /* DeckView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeckView.swift; sourceTree = "<group>"; };
+		A20000000000000000000010 /* TranscriptionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionsView.swift; sourceTree = "<group>"; };
+		A20000000000000000000011 /* DictionaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryView.swift; sourceTree = "<group>"; };
+		A20000000000000000000012 /* MainWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowView.swift; sourceTree = "<group>"; };
+		A20000000000000000000013 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		A20000000000000000000014 /* AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = AppIcon.icns; sourceTree = "<group>"; };
+		A20000000000000000000015 /* LogoMark.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = LogoMark.png; sourceTree = "<group>"; };
+		A20000000000000000000016 /* NamePlate.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = NamePlate.png; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A40000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A50000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				A50000000000000000000002 /* YouFlow */,
+				A50000000000000000000003 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A50000000000000000000002 /* YouFlow */ = {
+			isa = PBXGroup;
+			children = (
+				A50000000000000000000004 /* Sources */,
+				A50000000000000000000005 /* Resources */,
+			);
+			path = YouFlow;
+			sourceTree = "<group>";
+		};
+		A50000000000000000000003 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A30000000000000000000001 /* UFlow.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		A50000000000000000000004 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000013 /* SettingsView.swift */,
+				A20000000000000000000012 /* MainWindowView.swift */,
+				A20000000000000000000011 /* DictionaryView.swift */,
+				A20000000000000000000010 /* TranscriptionsView.swift */,
+				A2000000000000000000000F /* DeckView.swift */,
+				A2000000000000000000000E /* Components.swift */,
+				A2000000000000000000000D /* SoundKit.swift */,
+				A20000000000000000000031 /* Persistence.swift */,
+				A20000000000000000000030 /* DesignTokens.swift */,
+				A20000000000000000000001 /* DictationApp.swift */,
+				A20000000000000000000002 /* AppState.swift */,
+				A20000000000000000000003 /* PermissionManager.swift */,
+				A20000000000000000000004 /* HotkeyManager.swift */,
+				A20000000000000000000005 /* SpeechEngine.swift */,
+				A20000000000000000000006 /* HUDPanel.swift */,
+				A20000000000000000000007 /* ClipboardInjector.swift */,
+				A20000000000000000000008 /* StatusBarController.swift */,
+				A20000000000000000000009 /* TranscriptProcessor.swift */,
+				A2000000000000000000000A /* Logging.swift */,
+				A2000000000000000000000B /* Info.plist */,
+				A2000000000000000000000C /* YouFlow.entitlements */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		A50000000000000000000005 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000016 /* NamePlate.png */,
+				A20000000000000000000015 /* LogoMark.png */,
+				A20000000000000000000014 /* AppIcon.icns */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A60000000000000000000001 /* YouFlow */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A70000000000000000000005 /* Build configuration list for PBXNativeTarget "YouFlow" */;
+			buildPhases = (
+				A80000000000000000000001 /* Sources */,
+				A40000000000000000000001 /* Frameworks */,
+				A80000000000000000000002 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = YouFlow;
+			productName = YouFlow;
+			productReference = A30000000000000000000001 /* UFlow.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A90000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2600;
+				LastUpgradeCheck = 2600;
+				TargetAttributes = {
+					A60000000000000000000001 = {
+						CreatedOnToolsVersion = 26.0;
+					};
+				};
+			};
+			buildConfigurationList = A70000000000000000000001 /* Build configuration list for PBXProject "YouFlow" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = A50000000000000000000001;
+			productRefGroup = A50000000000000000000003 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A60000000000000000000001 /* YouFlow */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A80000000000000000000002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000016 /* NamePlate.png in Resources */,
+				A10000000000000000000015 /* LogoMark.png in Resources */,
+				A10000000000000000000014 /* AppIcon.icns in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A80000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000013 /* SettingsView.swift in Sources */,
+				A10000000000000000000012 /* MainWindowView.swift in Sources */,
+				A10000000000000000000011 /* DictionaryView.swift in Sources */,
+				A10000000000000000000010 /* TranscriptionsView.swift in Sources */,
+				A1000000000000000000000F /* DeckView.swift in Sources */,
+				A1000000000000000000000E /* Components.swift in Sources */,
+				A1000000000000000000000D /* SoundKit.swift in Sources */,
+				A1000000000000000000000C /* Persistence.swift in Sources */,
+				A1000000000000000000000B /* DesignTokens.swift in Sources */,
+				A10000000000000000000001 /* DictationApp.swift in Sources */,
+				A10000000000000000000002 /* AppState.swift in Sources */,
+				A10000000000000000000003 /* PermissionManager.swift in Sources */,
+				A10000000000000000000004 /* HotkeyManager.swift in Sources */,
+				A10000000000000000000005 /* SpeechEngine.swift in Sources */,
+				A10000000000000000000006 /* HUDPanel.swift in Sources */,
+				A10000000000000000000007 /* ClipboardInjector.swift in Sources */,
+				A10000000000000000000008 /* StatusBarController.swift in Sources */,
+				A10000000000000000000009 /* TranscriptProcessor.swift in Sources */,
+				A1000000000000000000000A /* Logging.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		B10000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		B10000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		B10000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = YouFlow/Sources/YouFlow.entitlements;
+				CODE_SIGN_IDENTITY = "YouFlow Dev";
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				EXECUTABLE_PREFIX = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = YouFlow/Sources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				CURRENT_PROJECT_VERSION = 1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.youflow.dictation;
+				PRODUCT_NAME = UFlow;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		B10000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = YouFlow/Sources/YouFlow.entitlements;
+				CODE_SIGN_IDENTITY = "YouFlow Dev";
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				EXECUTABLE_PREFIX = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = YouFlow/Sources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				CURRENT_PROJECT_VERSION = 1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.youflow.dictation;
+				PRODUCT_NAME = UFlow;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A70000000000000000000001 /* Build configuration list for PBXProject "YouFlow" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B10000000000000000000001 /* Debug */,
+				B10000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A70000000000000000000005 /* Build configuration list for PBXNativeTarget "YouFlow" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B10000000000000000000003 /* Debug */,
+				B10000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = A90000000000000000000001 /* Project object */;
+}

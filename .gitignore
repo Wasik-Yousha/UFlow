@@ -1,0 +1,23 @@
+# Build output
+build/
+DerivedData/
+*.xcarchive
+dist/
+
+# Signing material — NEVER commit these.
+# youflow-key.pem is an unencrypted private key.
+*.pem
+*.p12
+*.mobileprovision
+*.cer
+
+# Third-party reference checkout (has its own git history)
+reference/
+
+# Xcode user state
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+
+# macOS
+.DS_Store

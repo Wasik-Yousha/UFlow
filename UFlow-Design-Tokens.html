@@ -1,0 +1,815 @@
+<title>UFlow Deck Tokens</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap">
+
+<style>
+/* ===================================================================
+   UFlow token sheet. Every value below mirrors DesignTokens.swift.
+   Light palette is complete on bare :root; dark redefines tokens only.
+   =================================================================== */
+:root{
+  --chassis-top:#F7EEE0; --chassis-bottom:#E8D9C2;
+  --chassis-hi:#FFFBF2;  --chassis-lo:#C9B79C;
+  --panel-face:#EFE3D1;  --panel-well:#E2D3BC; --panel-rule:#D3C0A3;
+  --grille:#B9A98F;      --grille-ring:#9C8A6E; --plate-face:#EDE0CB;
+
+  --app-bg:#F6ECDE; --surface:#F4EADC; --surface-raised:#EFE4D2;
+  --field:#FBF4E9; --divider:#DCCBB1; --hairline:#E3D5BE;
+
+  --text-1:#2B2018; --text-2:#6F6154; --text-3:#A8967F; --text-on:#FDF1D3;
+
+  --accent:#CC330D; --accent-pressed:#A82708; --engine:#26747E;
+  --corrected:#C87A0C; --warning:#B5651D; --danger:#CC330D;
+
+  --rec-top:#D2542C; --rec-bottom:#A83A1B; --rec-bezel:#8E5A3E; --rec-cap:#F2E7D6;
+  --stop-top:#8A8276; --stop-bottom:#6E665C; --stop-cap:#E6DDD0;
+
+  --led-window:#26221E; --led-on:#FE4A29; --led-lamp:#FF3B1E; --led-lamp-off:#8A5A4C;
+  --meter-face:#EAD6B3; --meter-ink:#3B2F20; --meter-danger:#C02A12; --meter-bezel:#B09A78;
+
+  --shadow-rgb:43,32,24;
+  --card-sh:0 1px 2px rgba(43,32,24,.06);
+  --raised-sh:0 2px 4px rgba(43,32,24,.22);
+  --deck-sh:0 3px 10px rgba(43,32,24,.18);
+  --popover-sh:0 6px 20px rgba(43,32,24,.25);
+
+  --r-chip:2px; --r-panel:4px; --r-card:6px; --r-control:8px; --r-deck:12px;
+
+  --sans:"Barlow",-apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif;
+  --cond:"Barlow Condensed","Barlow",-apple-system,sans-serif;
+  --mono:"DM Mono",ui-monospace,"SF Mono",Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --chassis-top:#2A2724; --chassis-bottom:#171614;
+    --chassis-hi:#6E655C;  --chassis-lo:#000000;
+    --panel-face:#2C2925;  --panel-well:#1A1815; --panel-rule:#3A3632;
+    --grille:#3A3733;      --grille-ring:#5A544D; --plate-face:#201E1B;
+
+    --app-bg:#141312; --surface:#1B1A18; --surface-raised:#232120;
+    --field:#0F0F0E; --divider:#2A2825; --hairline:#262421;
+
+    --text-1:#E8E8E3; --text-2:#A09A93; --text-3:#6E6862; --text-on:#FDF1D3;
+
+    --accent:#F4452A; --accent-pressed:#D63A22; --engine:#A8C4C9;
+    --corrected:#EDAB59; --warning:#E8A33C; --danger:#F4452A;
+
+    --rec-top:#B5301B; --rec-bottom:#7E2011; --rec-bezel:#4A423C; --rec-cap:#E24A32;
+    --stop-top:#3E3C3A; --stop-bottom:#2A2927; --stop-cap:#BDB8B2;
+
+    --led-window:#1C1917; --led-lamp-off:#4A2A22;
+    --meter-face:#CDB289; --meter-ink:#33291C; --meter-danger:#D03217; --meter-bezel:#151310;
+
+    --shadow-rgb:0,0,0;
+    --card-sh:0 1px 2px rgba(0,0,0,.06);
+    --raised-sh:0 2px 4px rgba(0,0,0,.22);
+    --deck-sh:0 3px 10px rgba(0,0,0,.18);
+    --popover-sh:0 6px 20px rgba(0,0,0,.25);
+  }
+}
+:root[data-theme="dark"]{
+  --chassis-top:#2A2724; --chassis-bottom:#171614;
+  --chassis-hi:#6E655C;  --chassis-lo:#000000;
+  --panel-face:#2C2925;  --panel-well:#1A1815; --panel-rule:#3A3632;
+  --grille:#3A3733;      --grille-ring:#5A544D; --plate-face:#201E1B;
+
+  --app-bg:#141312; --surface:#1B1A18; --surface-raised:#232120;
+  --field:#0F0F0E; --divider:#2A2825; --hairline:#262421;
+
+  --text-1:#E8E8E3; --text-2:#A09A93; --text-3:#6E6862; --text-on:#FDF1D3;
+
+  --accent:#F4452A; --accent-pressed:#D63A22; --engine:#A8C4C9;
+  --corrected:#EDAB59; --warning:#E8A33C; --danger:#F4452A;
+
+  --rec-top:#B5301B; --rec-bottom:#7E2011; --rec-bezel:#4A423C; --rec-cap:#E24A32;
+  --stop-top:#3E3C3A; --stop-bottom:#2A2927; --stop-cap:#BDB8B2;
+
+  --led-window:#1C1917; --led-lamp-off:#4A2A22;
+  --meter-face:#CDB289; --meter-ink:#33291C; --meter-danger:#D03217; --meter-bezel:#151310;
+
+  --shadow-rgb:0,0,0;
+  --card-sh:0 1px 2px rgba(0,0,0,.06);
+  --raised-sh:0 2px 4px rgba(0,0,0,.22);
+  --deck-sh:0 3px 10px rgba(0,0,0,.18);
+  --popover-sh:0 6px 20px rgba(0,0,0,.25);
+}
+
+*{box-sizing:border-box;}
+body{
+  margin:0; background:var(--app-bg); color:var(--text-1);
+  font-family:var(--sans); font-size:15px; line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1060px; margin:0 auto; padding:0 24px 96px;}
+
+/* ---------- silkscreen label, the sheet's structural device ---------- */
+.silk{
+  font-family:var(--cond); font-weight:600; text-transform:uppercase;
+  letter-spacing:.16em; font-size:12px; color:var(--text-2);
+}
+
+/* ---------- masthead ---------- */
+header{padding:44px 0 28px;}
+.mast{display:flex; align-items:flex-end; justify-content:space-between; gap:24px; flex-wrap:wrap;}
+h1{
+  font-family:var(--cond); font-weight:700; text-transform:uppercase;
+  letter-spacing:.34em; font-size:clamp(30px,6vw,52px); line-height:1;
+  margin:0; color:var(--text-1); text-wrap:balance;
+}
+.mast .sub{font-family:var(--mono); font-size:12px; color:var(--text-3); margin-top:10px; letter-spacing:.02em;}
+.stamp{
+  font-family:var(--cond); text-transform:uppercase; letter-spacing:.18em;
+  font-size:11px; font-weight:600; color:var(--accent);
+  border:1px solid var(--accent); border-radius:var(--r-chip);
+  padding:5px 10px; white-space:nowrap;
+}
+.lede{
+  margin:26px 0 0; max-width:62ch; color:var(--text-2); font-size:16px;
+}
+.lede b{color:var(--text-1); font-weight:600;}
+
+/* ---------- module: the repeating section frame ---------- */
+section{border-top:1px solid var(--divider); padding-top:18px; margin-top:52px;}
+.modhead{display:flex; align-items:baseline; gap:14px; margin-bottom:22px; flex-wrap:wrap;}
+.modhead h2{
+  font-family:var(--cond); font-weight:700; text-transform:uppercase;
+  letter-spacing:.2em; font-size:17px; margin:0; color:var(--text-1);
+}
+.modhead .note{font-size:13.5px; color:var(--text-2); flex:1 1 240px; min-width:0;}
+
+/* ---------- live deck ---------- */
+.deck{
+  background:linear-gradient(180deg,var(--chassis-top),var(--chassis-bottom));
+  border-radius:var(--r-deck); box-shadow:var(--deck-sh);
+  border-top:1px solid var(--chassis-hi); border-bottom:1px solid var(--chassis-lo);
+  padding:16px; display:grid; gap:12px;
+  grid-template-columns:minmax(150px,190px) minmax(220px,1fr) minmax(120px,160px);
+}
+@media (max-width:760px){ .deck{grid-template-columns:1fr;} }
+.mod{
+  background:var(--panel-face); border-radius:var(--r-panel);
+  border-top:1px solid var(--chassis-hi); border-bottom:1px solid var(--chassis-lo);
+  padding:10px 12px 12px; min-width:0;
+}
+.mod > .cap{
+  display:flex; align-items:center; gap:8px; justify-content:center;
+  font-family:var(--cond); font-weight:500; text-transform:uppercase;
+  letter-spacing:.22em; font-size:9.5px; color:var(--text-2); margin-bottom:9px;
+}
+.mod > .cap::before, .mod > .cap::after{
+  content:""; height:1px; flex:1; background:var(--panel-rule);
+}
+.keys{display:flex; gap:10px; justify-content:center;}
+.key{
+  width:74px; height:62px; border-radius:var(--r-card); border:0; cursor:pointer;
+  box-shadow:var(--raised-sh); display:flex; flex-direction:column;
+  align-items:center; justify-content:center; gap:6px;
+  font-family:var(--cond); font-weight:600; text-transform:uppercase;
+  letter-spacing:.12em; font-size:10px; transition:transform 70ms ease-out, box-shadow 70ms ease-out;
+  padding:0;
+}
+.key:active,.key.down{transform:translateY(2px); box-shadow:0 0 0 rgba(0,0,0,0);}
+.key.rec{background:linear-gradient(180deg,var(--rec-top),var(--rec-bottom));
+  color:var(--text-on); outline:2px solid var(--rec-bezel); outline-offset:1px;}
+.key.stp{background:linear-gradient(180deg,var(--stop-top),var(--stop-bottom)); color:var(--text-on);}
+.key .cap-dot{width:17px;height:17px;border-radius:50%;background:var(--rec-cap);}
+.key .cap-sq{width:15px;height:15px;border-radius:1px;background:var(--stop-cap);}
+.reclamp{display:flex; align-items:center; gap:7px; margin-top:11px; padding-left:4px;}
+.reclamp i{
+  width:9px;height:9px;border-radius:50%;background:var(--led-lamp-off);
+  display:block; transition:background 120ms;
+}
+.reclamp.on i{background:var(--led-lamp); box-shadow:0 0 6px rgba(255,59,30,.55);}
+.reclamp span{font-family:var(--cond);text-transform:uppercase;letter-spacing:.18em;font-size:9px;color:var(--text-2);}
+.reclamp.on span{color:var(--accent);}
+
+.vu{
+  background:linear-gradient(180deg,var(--meter-face),color-mix(in srgb,var(--meter-face) 82%,transparent));
+  border:1px solid var(--meter-bezel); border-radius:var(--r-panel);
+  box-shadow:inset 0 1px 3px rgba(var(--shadow-rgb),.25);
+  width:100%; display:block;
+}
+.counter{
+  background:var(--led-window); border-radius:var(--r-panel);
+  box-shadow:inset 0 1px 3px rgba(0,0,0,.6);
+  padding:9px 6px; display:flex; justify-content:center;
+}
+.minsec{display:flex; justify-content:space-around; margin-top:7px;
+  font-family:var(--cond);text-transform:uppercase;letter-spacing:.18em;font-size:8px;color:var(--text-2);}
+
+/* ---------- color tokens ---------- */
+.grp{margin-bottom:30px;}
+.grp > .silk{display:block; margin-bottom:9px;}
+.rows{border:1px solid var(--hairline); border-radius:var(--r-card); overflow:hidden; background:var(--surface);}
+.row{
+  display:grid; grid-template-columns:52px minmax(0,1.05fr) 132px minmax(0,1.25fr);
+  gap:14px; align-items:center; padding:8px 12px;
+  border-bottom:1px solid var(--hairline);
+}
+.row:last-child{border-bottom:0;}
+.row:hover{background:var(--surface-raised);}
+@media (max-width:700px){
+  .row{grid-template-columns:52px minmax(0,1fr); row-gap:4px;}
+  .row .hexes{grid-column:2;} .row .use{grid-column:2;}
+}
+.chip{
+  width:52px;height:30px;border-radius:var(--r-chip);
+  border:1px solid var(--hairline); display:flex; overflow:hidden; box-shadow:var(--card-sh);
+}
+.chip span{flex:1; display:block;}
+.tname{font-family:var(--mono); font-size:12.5px; color:var(--text-1); overflow-wrap:anywhere;}
+.hexes{font-family:var(--mono); font-size:11px; color:var(--text-3); display:flex; gap:9px; font-variant-numeric:tabular-nums;}
+.hexes b{font-weight:400; color:var(--text-2);}
+.use{font-size:13px; color:var(--text-2); min-width:0;}
+
+/* ---------- type specimens ---------- */
+.typerow{
+  display:grid; grid-template-columns:minmax(0,1fr) 210px; gap:20px; align-items:baseline;
+  padding:13px 0; border-bottom:1px solid var(--hairline);
+}
+.typerow:last-child{border-bottom:0;}
+@media (max-width:640px){ .typerow{grid-template-columns:1fr; gap:5px;} }
+.spec{font-family:var(--mono); font-size:11px; color:var(--text-3); font-variant-numeric:tabular-nums;}
+.spec b{color:var(--text-2); font-weight:400;}
+.sp-word{font-family:var(--cond);font-weight:600;text-transform:uppercase;letter-spacing:.39em;font-size:14px;}
+.sp-hw{font-family:var(--cond);font-weight:500;text-transform:uppercase;letter-spacing:.23em;font-size:9.5px;color:var(--text-2);}
+.sp-hwsm{font-family:var(--cond);font-weight:500;text-transform:uppercase;letter-spacing:.175em;font-size:8px;color:var(--text-2);}
+.sp-tab{font-family:var(--sans);font-weight:600;text-transform:uppercase;letter-spacing:.113em;font-size:11.5px;color:var(--accent);}
+.sp-meta{font-family:var(--sans);font-weight:600;text-transform:uppercase;letter-spacing:.064em;font-size:11px;color:var(--engine);}
+.sp-body{font-family:var(--sans);font-weight:400;font-size:13px;line-height:1.62;}
+.sp-term{font-family:var(--sans);font-weight:500;font-size:13px;}
+.sp-cap{font-family:var(--sans);font-weight:500;letter-spacing:.048em;font-size:10.5px;color:var(--text-2);}
+.sp-btn{font-family:var(--sans);font-weight:600;text-transform:uppercase;letter-spacing:.095em;font-size:10.5px;color:var(--accent);}
+.sp-micro{font-family:var(--cond);font-weight:500;text-transform:uppercase;letter-spacing:.178em;font-size:9px;color:var(--text-2);}
+.sp-plate{font-family:var(--cond);font-weight:500;text-transform:uppercase;letter-spacing:.16em;font-size:7.5px;color:var(--text-2);}
+
+/* ---------- scales ---------- */
+.scale{display:flex; flex-wrap:wrap; gap:8px;}
+.sbar{
+  background:var(--surface); border:1px solid var(--hairline); border-radius:var(--r-card);
+  padding:9px 11px; display:flex; flex-direction:column; gap:7px; min-width:74px;
+}
+.sbar .bar{height:9px; background:var(--accent); border-radius:1px;}
+.sbar .lab{font-family:var(--mono); font-size:11px; color:var(--text-2); font-variant-numeric:tabular-nums;}
+
+.radii{display:flex; flex-wrap:wrap; gap:12px;}
+.rbox{
+  width:96px;height:74px; background:var(--panel-face); border:1px solid var(--hairline);
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px;
+}
+.rbox .lab{font-family:var(--mono);font-size:10.5px;color:var(--text-2);text-align:center;line-height:1.3;}
+
+.shadows{display:flex; flex-wrap:wrap; gap:16px;}
+.shbox{
+  width:150px;height:78px;background:var(--surface);border-radius:var(--r-card);
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-size:11px;color:var(--text-2);text-align:center;padding:8px;
+}
+
+/* ---------- motion ---------- */
+.motion-grid{display:grid; grid-template-columns:minmax(260px,1fr) minmax(240px,320px); gap:26px; align-items:start;}
+@media (max-width:760px){ .motion-grid{grid-template-columns:1fr;} }
+.knobs{background:var(--surface); border:1px solid var(--hairline); border-radius:var(--r-card); padding:15px 16px;}
+.knob{margin-bottom:15px;}
+.knob:last-child{margin-bottom:0;}
+.knob label{display:flex; justify-content:space-between; gap:10px; align-items:baseline;
+  font-family:var(--mono); font-size:11.5px; color:var(--text-2); margin-bottom:7px; font-variant-numeric:tabular-nums;}
+.knob label b{color:var(--accent); font-weight:500;}
+.knob input[type=range]{width:100%; accent-color:var(--accent);}
+.mtable{width:100%; border-collapse:collapse;}
+.mtable td{padding:7px 0; border-bottom:1px solid var(--hairline); vertical-align:baseline;}
+.mtable tr:last-child td{border-bottom:0;}
+.mtable td:first-child{font-family:var(--mono); font-size:12px; color:var(--text-1); padding-right:14px; white-space:nowrap;}
+.mtable td:nth-child(2){font-family:var(--mono); font-size:11px; color:var(--text-3); padding-right:14px; white-space:nowrap; font-variant-numeric:tabular-nums;}
+.mtable td:last-child{font-size:13px; color:var(--text-2);}
+
+/* ---------- sound ---------- */
+.sfx{display:grid; grid-template-columns:repeat(auto-fill,minmax(232px,1fr)); gap:10px;}
+.sfxcard{
+  background:var(--surface); border:1px solid var(--hairline); border-radius:var(--r-card);
+  padding:11px 13px;
+}
+.sfxcard .n{font-family:var(--mono); font-size:12.5px; color:var(--text-1);}
+.sfxcard .d{font-size:12.5px; color:var(--text-2); margin-top:3px;}
+
+/* ---------- decisions ---------- */
+.decide{background:var(--surface); border:1px solid var(--hairline);
+  border-left:3px solid var(--accent); border-radius:var(--r-card); padding:15px 17px; margin-bottom:12px;}
+.decide h3{font-family:var(--cond); text-transform:uppercase; letter-spacing:.15em;
+  font-size:13px; margin:0 0 6px; color:var(--text-1);}
+.decide p{margin:0; font-size:13.5px; color:var(--text-2);}
+.decide p + p{margin-top:7px;}
+.decide .rec{color:var(--text-1);}
+.decide .rec b{color:var(--accent); font-weight:600;}
+
+footer{margin-top:56px; padding-top:18px; border-top:1px solid var(--divider);
+  font-family:var(--mono); font-size:11.5px; color:var(--text-3);}
+
+@media (prefers-reduced-motion:reduce){ *{animation:none!important; transition:none!important;} }
+</style>
+
+<div class="wrap">
+
+<header>
+  <div class="mast">
+    <div>
+      <h1>UFlow</h1>
+      <div class="sub">DESIGN TOKENS v1 &nbsp;·&nbsp; DesignTokens.swift &nbsp;·&nbsp; 345 lines &nbsp;·&nbsp; typechecks clean</div>
+    </div>
+    <div class="stamp">Awaiting approval</div>
+  </div>
+  <p class="lede">
+    Every value here is <b>measured, not invented</b> — the brand four come out of
+    <span style="font-family:var(--mono);font-size:13px">UFlow_logo.png</span>, the chassis and screen values out of your
+    reference screenshots. Views pull from <span style="font-family:var(--mono);font-size:13px">Tok.*</span> and nothing else.
+    The deck below is live: press the keys, watch the needle. That is the actual motion spec, running.
+  </p>
+</header>
+
+<!-- ============================ LIVE DECK ============================ -->
+<section style="border-top:0; padding-top:0; margin-top:34px;">
+  <div class="deck">
+    <div class="mod">
+      <div class="cap">Transport</div>
+      <div class="keys">
+        <button class="key rec" id="kRec"><span class="cap-dot"></span>Record</button>
+        <button class="key stp" id="kStop"><span class="cap-sq"></span>Stop</button>
+      </div>
+      <div class="reclamp" id="lamp"><i></i><span>Rec</span></div>
+    </div>
+
+    <div class="mod">
+      <div class="cap">Level</div>
+      <svg class="vu" id="vu" viewBox="0 0 300 128" preserveAspectRatio="xMidYMid meet" aria-label="VU meter"></svg>
+    </div>
+
+    <div class="mod">
+      <div class="cap">Counter</div>
+      <div class="counter"><svg id="led" viewBox="0 0 118 44" width="118" height="44" aria-label="Elapsed time"></svg></div>
+      <div class="minsec"><span>Min</span><span>Sec</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ COLOR ============================ -->
+<section>
+  <div class="modhead">
+    <h2>Color</h2>
+    <div class="note">Every token is one dynamic pair resolved by appearance — left half is light, right half is dark.
+    No theme object is threaded through the views.</div>
+  </div>
+
+  <div class="grp">
+    <span class="silk">Brand — fixed in both appearances, sampled from the logo</span>
+    <div class="rows" id="gBrand"></div>
+  </div>
+  <div class="grp">
+    <span class="silk">Chassis — the hardware deck</span>
+    <div class="rows" id="gChassis"></div>
+  </div>
+  <div class="grp">
+    <span class="silk">Screen — the content area below the deck</span>
+    <div class="rows" id="gScreen"></div>
+  </div>
+  <div class="grp">
+    <span class="silk">Text</span>
+    <div class="rows" id="gText"></div>
+  </div>
+  <div class="grp">
+    <span class="silk">Accent &amp; semantic</span>
+    <div class="rows" id="gAccent"></div>
+  </div>
+  <div class="grp">
+    <span class="silk">Transport hardware</span>
+    <div class="rows" id="gTransport"></div>
+  </div>
+  <div class="grp">
+    <span class="silk">LED &amp; counter</span>
+    <div class="rows" id="gLed"></div>
+  </div>
+  <div class="grp">
+    <span class="silk">VU meter</span>
+    <div class="rows" id="gMeter"></div>
+  </div>
+</section>
+
+<!-- ============================ TYPE ============================ -->
+<section>
+  <div class="modhead">
+    <h2>Type</h2>
+    <div class="note">Hardware labels use the condensed system width with wide tracking — silkscreen on a cassette deck.
+    Body copy stays at standard width so long transcripts read comfortably. Counter digits are drawn as segments, not glyphs.</div>
+  </div>
+  <div id="typeList"></div>
+</section>
+
+<!-- ============================ SPACE / RADIUS / STROKE ============================ -->
+<section>
+  <div class="modhead"><h2>Space</h2><div class="note">2pt base grid. Nine steps, named by their value so there is nothing to look up.</div></div>
+  <div class="scale" id="spaceScale"></div>
+
+  <div class="modhead" style="margin-top:38px;"><h2>Radius</h2><div class="note">Five steps plus a pill. Measured off the reference: rows and transport keys 6, search field and tabs 8.</div></div>
+  <div class="radii" id="radiusScale"></div>
+
+  <div class="modhead" style="margin-top:38px;"><h2>Stroke</h2><div class="note">Hardware gets an emboss pair — one highlight line on top, one shadow line beneath — rather than a flat border.</div></div>
+  <div class="rows" id="gStroke"></div>
+</section>
+
+<!-- ============================ SHADOW ============================ -->
+<section>
+  <div class="modhead"><h2>Shadow</h2><div class="note">Four drops and one inset. Warm-black in light, true black in dark.</div></div>
+  <div class="shadows">
+    <div class="shbox" style="box-shadow:var(--card-sh)">Tok.Sh.card<br>0 1 2 · 6%</div>
+    <div class="shbox" style="box-shadow:var(--raised-sh)">Tok.Sh.raised<br>0 2 4 · 22%</div>
+    <div class="shbox" style="box-shadow:var(--deck-sh)">Tok.Sh.deck<br>0 3 10 · 18%</div>
+    <div class="shbox" style="box-shadow:var(--popover-sh)">Tok.Sh.popover<br>0 6 20 · 25%</div>
+    <div class="shbox" style="box-shadow:inset 0 1px 3px rgba(var(--shadow-rgb),.25)">Tok.Sh.well<br>inset 0 1 3 · 25%</div>
+  </div>
+</section>
+
+<!-- ============================ MOTION ============================ -->
+<section>
+  <div class="modhead">
+    <h2>Motion</h2>
+    <div class="note">The needle is the only place with real ballistics. A VU meter snaps toward a peak and falls back slowly —
+    drag the knobs and the deck above responds live. These two values are the calibration knob I want you to set.</div>
+  </div>
+  <div class="motion-grid">
+    <table class="mtable">
+      <tr><td>Tok.M.press</td><td>0.07s</td><td>Key going down, tab press</td></tr>
+      <tr><td>Tok.M.hover</td><td>0.14s</td><td>Row hover, button hover</td></tr>
+      <tr><td>Tok.M.tab</td><td>0.22s spring</td><td>Transcriptions ⇄ Dictionary</td></tr>
+      <tr><td>Tok.M.sheet</td><td>0.28s spring</td><td>Add / edit dictionary entry</td></tr>
+      <tr><td>Tok.M.listRow</td><td>0.24s</td><td>New transcript arriving</td></tr>
+      <tr><td>Tok.M.lampBlink</td><td>1.10s</td><td>REC lamp while recording</td></tr>
+      <tr><td>Tok.M.needleAttack</td><td id="tAtk">0.045s</td><td>How fast the needle chases a peak</td></tr>
+      <tr><td>Tok.M.needleRelease</td><td id="tRel">0.32s</td><td>How slowly it falls back</td></tr>
+      <tr><td>Tok.M.needleRefreshHz</td><td>60</td><td>Needle sample rate</td></tr>
+    </table>
+    <div class="knobs">
+      <div class="knob">
+        <label>needleAttack <b id="vAtk">45 ms</b></label>
+        <input type="range" id="sAtk" min="10" max="200" value="45">
+      </div>
+      <div class="knob">
+        <label>needleRelease <b id="vRel">320 ms</b></label>
+        <input type="range" id="sRel" min="60" max="900" value="320">
+      </div>
+      <div class="knob">
+        <label>simulated input <b id="vLvl">idle</b></label>
+        <input type="range" id="sLvl" min="0" max="100" value="0">
+        <div style="font-size:12px;color:var(--text-3);margin-top:8px;line-height:1.45">
+          Leave at 0 for the simulated speech envelope, or drag to drive the needle by hand.
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ SOUND ============================ -->
+<section>
+  <div class="modhead">
+    <h2>Sound</h2>
+    <div class="note">Eight cues, synthesised at launch rather than shipped as audio files — a short noise burst through a
+    band-pass with a fast decay is exactly what a latching plastic key sounds like. Master level 0.35.</div>
+  </div>
+  <div class="sfx">
+    <div class="sfxcard"><div class="n">.recordDown</div><div class="d">Heavy latching key going down. The deepest cue in the set.</div></div>
+    <div class="sfxcard"><div class="n">.stopDown</div><div class="d">Shorter, harder clunk — the key releasing the latch.</div></div>
+    <div class="sfxcard"><div class="n">.keyUp</div><div class="d">Soft release tick under every key coming back up.</div></div>
+    <div class="sfxcard"><div class="n">.tabSwitch</div><div class="d">Small detent tick, like a rotary selector passing a stop.</div></div>
+    <div class="sfxcard"><div class="n">.copy</div><div class="d">Light click for Copy on a transcript row.</div></div>
+    <div class="sfxcard"><div class="n">.add</div><div class="d">Click with a short rising tail — a dictionary entry landing.</div></div>
+    <div class="sfxcard"><div class="n">.delete</div><div class="d">Dull thunk, no tail.</div></div>
+    <div class="sfxcard"><div class="n">.error</div><div class="d">Low buzz for a rejected or unsafe dictionary entry.</div></div>
+  </div>
+</section>
+
+<!-- ============================ DECISIONS ============================ -->
+<section>
+  <div class="modhead"><h2>Three calls I need from you</h2><div class="note">Everything else I will build straight from the references.</div></div>
+
+  <div class="decide">
+    <h3>1 · The left nameplate</h3>
+    <p>Your references say <span style="font-family:var(--mono)">SONY / CFS-715S / FM/SW/MW / STEREO CASSETTE-CORDER</span>.
+    That is someone else's trademark on your app.</p>
+    <p class="rec"><b>My call:</b> drop in your metal <span style="font-family:var(--mono)">UFlow_textlogo.png</span> plate where SONY sits —
+    it is already the right shape and finish — and set the model text to
+    <span style="font-family:var(--mono)">UF-715S / ON-DEVICE / SPEECH TRANSCRIBER</span>. Same layout, same rhythm, your brand.</p>
+  </div>
+
+  <div class="decide">
+    <h3>2 · The right-hand plate</h3>
+    <p>Light reference shows the UFlow logo mark there. Dark reference shows a Bangladesh rickshaw plate instead.</p>
+    <p class="rec"><b>My call:</b> the logo mark in both, so the app looks like one product. Say the word if the Bangladesh
+    plate is deliberate and you want it kept in dark.</p>
+  </div>
+
+  <div class="decide">
+    <h3>3 · Dictionary row dots</h3>
+    <p>Light reference cycles the dots through four brand colours. Dark reference makes them all green.</p>
+    <p class="rec"><b>My call:</b> the four-colour cycle in both — it is already in the tokens as
+    <span style="font-family:var(--mono)">Tok.Brand.cycle</span> and it reuses colours the app already owns, where the green
+    would be a fifth colour that appears nowhere else.</p>
+  </div>
+</section>
+
+<footer>
+  YouFlow/Sources/DesignTokens.swift · sampled from Asssets/LOGO and Asssets/APP UI inspiration ·
+  approve or mark up and the views get built against exactly this
+</footer>
+
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  /* ------------------------------------------------------------------ *
+   * Color token table. [name, light, dark, usage]
+   * ------------------------------------------------------------------ */
+  const G = {
+    gBrand: [
+      ["Tok.Brand.vermilion","#D5391B","#D5391B","Record, active tab, destructive"],
+      ["Tok.Brand.teal","#0A444F","#0A444F","Engine tags, TERM entries"],
+      ["Tok.Brand.amber","#E88E14","#E88E14","Corrections, warnings"],
+      ["Tok.Brand.cream","#FDF1D3","#FDF1D3","Type on any accent fill"],
+      ["Tok.Brand.umber","#7A4A2B","#7A4A2B","Fourth step of the row cycle"],
+    ],
+    gChassis: [
+      ["Tok.C.chassisTop","#F7EEE0","#2A2724","Deck gradient, top"],
+      ["Tok.C.chassisBottom","#E8D9C2","#171614","Deck gradient, bottom"],
+      ["Tok.C.chassisEdgeHi","#FFFBF2","#6E655C","Emboss highlight, 1px top"],
+      ["Tok.C.chassisEdgeLo","#C9B79C","#000000","Emboss shadow, 1px bottom"],
+      ["Tok.C.panelFace","#EFE3D1","#2C2925","Recessed module face"],
+      ["Tok.C.panelWell","#E2D3BC","#1A1815","Deep inset well"],
+      ["Tok.C.panelRule","#D3C0A3","#3A3632","Hairline beside a module label"],
+      ["Tok.C.grille","#B9A98F","#3A3733","Speaker mesh"],
+      ["Tok.C.grilleRing","#9C8A6E","#5A544D","Speaker chrome ring"],
+      ["Tok.C.plateFace","#EDE0CB","#201E1B","Nameplate metal"],
+    ],
+    gScreen: [
+      ["Tok.C.appBg","#F6ECDE","#141312","Window ground"],
+      ["Tok.C.surface","#F4EADC","#1B1A18","Transcript row, dictionary row"],
+      ["Tok.C.surfaceRaised","#EFE4D2","#232120","Hover and selected row"],
+      ["Tok.C.field","#FBF4E9","#0F0F0E","Search input"],
+      ["Tok.C.divider","#DCCBB1","#2A2825","Section rule"],
+      ["Tok.C.hairline","#E3D5BE","#262421","Card border"],
+    ],
+    gText: [
+      ["Tok.C.textPrimary","#2B2018","#E8E8E3","Transcript body, dictionary terms"],
+      ["Tok.C.textSecondary","#6F6154","#A09A93","Inactive tab, timestamps, counts"],
+      ["Tok.C.textTertiary","#A8967F","#6E6862","Placeholder text"],
+      ["Tok.C.textOnAccent","#FDF1D3","#FDF1D3","Label on RECORD, on any fill"],
+    ],
+    gAccent: [
+      ["Tok.C.accent","#CC330D","#F4452A","Active tab, COPY, DELETE ALL, + ADD"],
+      ["Tok.C.accentPressed","#A82708","#D63A22","Pressed state of the above"],
+      ["Tok.C.engineTag","#26747E","#A8C4C9","APPLE (STREAMING) — lifted in dark for contrast"],
+      ["Tok.C.corrected","#C87A0C","#EDAB59","CORRECTED label and its chip"],
+      ["Tok.C.warning","#B5651D","#E8A33C","Dictionary entry that looks too broad"],
+      ["Tok.C.danger","#CC330D","#F4452A","DELETE"],
+      ["Tok.C.focusRing","#CC330D 45%","#F4452A 45%","Keyboard focus, 2pt"],
+    ],
+    gTransport: [
+      ["Tok.C.recordTop","#D2542C","#B5301B","RECORD gradient, top"],
+      ["Tok.C.recordBottom","#A83A1B","#7E2011","RECORD gradient, bottom"],
+      ["Tok.C.recordBezel","#8E5A3E","#4A423C","Surround around the RECORD key"],
+      ["Tok.C.recordCap","#F2E7D6","#E24A32","The round centre cap"],
+      ["Tok.C.stopTop","#8A8276","#3E3C3A","STOP gradient, top"],
+      ["Tok.C.stopBottom","#6E665C","#2A2927","STOP gradient, bottom"],
+      ["Tok.C.stopCap","#E6DDD0","#BDB8B2","The square glyph"],
+    ],
+    gLed: [
+      ["Tok.C.ledWindow","#26221E","#1C1917","Black plastic behind the digits"],
+      ["Tok.C.ledOn","#FE4A29","#FE4A29","Lit segment"],
+      ["Tok.C.ledOff","#FE4A29 9%","#FE4A29 9%","Unlit segment — the ghost eight"],
+      ["Tok.C.ledLamp","#FF3B1E","#FF3B1E","REC lamp, lit"],
+      ["Tok.C.ledLampOff","#8A5A4C","#4A2A22","REC lamp, dark"],
+    ],
+    gMeter: [
+      ["Tok.C.meterFace","#EAD6B3","#CDB289","Aged paper meter face"],
+      ["Tok.C.meterInk","#3B2F20","#33291C","Scale, ticks, needle, VU"],
+      ["Tok.C.meterDanger","#C02A12","#D03217","The 0 → + red arc"],
+      ["Tok.C.meterBezel","#B09A78","#151310","Frame around the glass"],
+    ],
+  };
+
+  const swatch = (c) => c.includes("%")
+    ? `<span style="background:${c.split(" ")[0]};opacity:${parseFloat(c.split(" ")[1])/100}"></span>`
+    : `<span style="background:${c}"></span>`;
+
+  for (const [id, rows] of Object.entries(G)) {
+    const host = document.getElementById(id);
+    if (!host) continue;
+    host.innerHTML = rows.map(([n, l, d, u]) => `
+      <div class="row">
+        <span class="chip">${swatch(l)}${swatch(d)}</span>
+        <span class="tname">${n}</span>
+        <span class="hexes"><b>${l}</b>${l === d ? "" : `<span>${d}</span>`}</span>
+        <span class="use">${u}</span>
+      </div>`).join("");
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Stroke tokens reuse the same row layout, chips omitted.
+   * ------------------------------------------------------------------ */
+  document.getElementById("gStroke").innerHTML = [
+    ["Tok.W.hairline","1.0","Card and row borders"],
+    ["Tok.W.medium","1.5","Active tab underline"],
+    ["Tok.W.bezel","2.0","Surround on the RECORD key"],
+    ["Tok.W.focus","2.0","Keyboard focus ring"],
+    ["Tok.W.meterNeedle","1.5","The needle itself"],
+    ["Tok.W.meterTick","1.0","Scale ticks"],
+  ].map(([n, w, u]) => `
+    <div class="row" style="grid-template-columns:52px minmax(0,1.05fr) 132px minmax(0,1.25fr)">
+      <span style="display:flex;align-items:center;height:30px">
+        <span style="flex:1;height:${w}px;background:var(--text-1)"></span>
+      </span>
+      <span class="tname">${n}</span>
+      <span class="hexes"><b>${w}pt</b></span>
+      <span class="use">${u}</span>
+    </div>`).join("");
+
+  /* ------------------------------------------------------------------ *
+   * Type specimens
+   * ------------------------------------------------------------------ */
+  document.getElementById("typeList").innerHTML = [
+    ["sp-word","UFLOW","Tok.T.wordmark","14 · semibold · +5.5 · upper","Window title bar"],
+    ["sp-hw","Transport &nbsp; Level &nbsp; Counter","Tok.T.hardware","9.5 · medium · condensed · +2.2","Silkscreened module labels"],
+    ["sp-hwsm","Mic &nbsp; Min &nbsp; Sec &nbsp; Rec","Tok.T.hardwareSm","8 · medium · condensed · +1.4","Smallest deck labels"],
+    ["sp-tab","Transcriptions","Tok.T.tab","11.5 · semibold · +1.3","Tabs"],
+    ["sp-meta","Apple (Streaming)","Tok.T.meta","11 · semibold · +0.7","Engine label, CORRECTED"],
+    ["sp-body","Okay, testing this now by saying the word Claude Code, let's see if it will actually correctly transcribe Claude Code.","Tok.T.body","13 · regular · 4pt leading","Transcript copy"],
+    ["sp-term","Anthropic","Tok.T.term","13 · medium","Dictionary term"],
+    ["sp-cap","3:19PM &nbsp;·&nbsp; 5 recordings &nbsp;·&nbsp; 11 entries","Tok.T.caption","10.5 · medium · +0.5","Timestamps and counts"],
+    ["sp-btn","Copy &nbsp; + Add &nbsp; Delete all","Tok.T.button","10.5 · semibold · +1.0","Buttons"],
+    ["sp-micro","Term &nbsp; Fix","Tok.T.micro","9 · medium · condensed · +1.6","Entry type badges"],
+    ["sp-plate","UF-715S · On-device · Speech transcriber","Tok.T.plate","7.5 · medium · condensed · +1.2","Model text under the nameplate"],
+  ].map(([cls, sample, tok, spec, use]) => `
+    <div class="typerow">
+      <div class="${cls}">${sample}</div>
+      <div class="spec"><b>${tok}</b><br>${spec}<br>${use}</div>
+    </div>`).join("");
+
+  /* ------------------------------------------------------------------ *
+   * Space + radius scales
+   * ------------------------------------------------------------------ */
+  document.getElementById("spaceScale").innerHTML =
+    [2,4,6,8,12,16,20,24,32,40].map(v => `
+      <div class="sbar"><div class="bar" style="width:${v}px"></div><div class="lab">s${v}</div></div>`).join("");
+
+  document.getElementById("radiusScale").innerHTML = [
+    [2,"chip","badges"],[4,"panel","modules"],[6,"card","rows · keys"],
+    [8,"control","field · tabs"],[12,"deck","chassis"],[999,"pill","—"],
+  ].map(([v,n,u]) => `
+    <div class="rbox" style="border-radius:${v === 999 ? 37 : v}px">
+      <div class="lab">Tok.R.${n}<br>${v === 999 ? "full" : v + "pt"}<br><span style="color:var(--text-3)">${u}</span></div>
+    </div>`).join("");
+
+  /* ------------------------------------------------------------------ *
+   * Seven-segment counter. Segments are drawn, not typeset, so the
+   * unlit "ghost eight" reads the way it does on real hardware.
+   * ------------------------------------------------------------------ */
+  const SEG = { // a b c d e f g
+    0:"abcdef", 1:"bc", 2:"abged", 3:"abgcd", 4:"fgbc",
+    5:"afgcd", 6:"afgedc", 7:"abc", 8:"abcdefg", 9:"afgbcd",
+  };
+  // Polygon points for one digit in a 20 x 34 box, 4pt segments.
+  const PTS = {
+    a:"3,1 17,1 14,4 6,4",       d:"3,33 17,33 14,30 6,30",
+    g:"3,17 6,15 14,15 17,17 14,19 6,19",
+    f:"1,3 4,6 4,14 1,16",       b:"19,3 16,6 16,14 19,16",
+    e:"1,18 4,20 4,28 1,31",     c:"19,18 16,20 16,28 19,31",
+  };
+  function digit(x, value) {
+    const on = SEG[value] || "";
+    return Object.entries(PTS).map(([k, p]) =>
+      `<polygon points="${p}" transform="translate(${x},5)" fill="var(--led-on)" opacity="${on.includes(k) ? 1 : 0.09}"/>`
+    ).join("");
+  }
+  const ledEl = document.getElementById("led");
+  function renderLed(totalSeconds) {
+    const m = Math.floor(totalSeconds / 60) % 100, s = Math.floor(totalSeconds % 60);
+    const colon = `<circle cx="59" cy="18" r="2" fill="var(--led-on)"/><circle cx="59" cy="31" r="2" fill="var(--led-on)"/>`;
+    ledEl.innerHTML =
+      digit(2, Math.floor(m / 10)) + digit(26, m % 10) + colon +
+      digit(68, Math.floor(s / 10)) + digit(92, s % 10);
+  }
+
+  /* ------------------------------------------------------------------ *
+   * VU meter. Scale is drawn once; the needle is the only moving part.
+   * ------------------------------------------------------------------ */
+  const vu = document.getElementById("vu");
+  const PIVOT_X = 150, PIVOT_Y = 118, ARM = 92, SWEEP = 52; // degrees each way
+  const MARKS = [["-20",0],["10",.16],["7",.28],["5",.38],["3",.48],["1",.58],["0",.66],["3",.82],["+",.97]];
+  function angleFor(t) { return -SWEEP + t * (SWEEP * 2); }
+  function pt(t, r) {
+    const a = (angleFor(t) - 90) * Math.PI / 180;
+    return [PIVOT_X + Math.cos(a) * r, PIVOT_Y + Math.sin(a) * r];
+  }
+  (function drawScale() {
+    let out = "";
+    // red danger arc from 0 to +
+    const [ax, ay] = pt(.66, 78), [bx, by] = pt(1, 78);
+    out += `<path d="M${ax},${ay} A78,78 0 0 1 ${bx},${by}" fill="none"
+            stroke="var(--meter-danger)" stroke-width="2.5"/>`;
+    // main arc
+    const [cx, cy] = pt(0, 78), [dx, dy] = pt(.66, 78);
+    out += `<path d="M${cx},${cy} A78,78 0 0 1 ${dx},${dy}" fill="none"
+            stroke="var(--meter-ink)" stroke-width="1.2"/>`;
+    // ticks
+    for (let i = 0; i <= 32; i++) {
+      const t = i / 32, major = i % 4 === 0;
+      const [x1, y1] = pt(t, 78), [x2, y2] = pt(t, major ? 69 : 73);
+      out += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
+              stroke="${t > .66 ? "var(--meter-danger)" : "var(--meter-ink)"}"
+              stroke-width="${major ? 1.4 : 1}"/>`;
+    }
+    // numerals
+    MARKS.forEach(([label, t]) => {
+      const [x, y] = pt(t, 60);
+      out += `<text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="middle"
+              font-family="Barlow Condensed, sans-serif" font-size="11" font-weight="500"
+              fill="${t > .66 ? "var(--meter-danger)" : "var(--meter-ink)"}">${label}</text>`;
+    });
+    out += `<text x="${PIVOT_X}" y="102" text-anchor="middle"
+            font-family="Barlow Condensed, sans-serif" font-size="12" font-weight="600"
+            letter-spacing="1.5" fill="var(--meter-ink)">VU</text>`;
+    out += `<line id="needle" x1="${PIVOT_X}" y1="${PIVOT_Y}" x2="${PIVOT_X}" y2="${PIVOT_Y - ARM}"
+            stroke="var(--meter-ink)" stroke-width="1.5" stroke-linecap="round"/>`;
+    vu.innerHTML = out;
+  })();
+  const needle = vu.querySelector("#needle");
+
+  /* ------------------------------------------------------------------ *
+   * Ballistics + simulated speech envelope.
+   * One-pole follower with separate attack and release constants —
+   * exactly what Tok.M.needleAttack / needleRelease drive in the app.
+   * ------------------------------------------------------------------ */
+  let attack = 0.045, release = 0.32;
+  let level = 0, shown = 0, recording = false, elapsed = 0, last = performance.now();
+  let burst = 0, manual = 0;
+
+  const sAtk = document.getElementById("sAtk"), sRel = document.getElementById("sRel"), sLvl = document.getElementById("sLvl");
+  const vAtk = document.getElementById("vAtk"), vRel = document.getElementById("vRel"), vLvl = document.getElementById("vLvl");
+  const tAtk = document.getElementById("tAtk"), tRel = document.getElementById("tRel");
+
+  sAtk.addEventListener("input", () => {
+    attack = +sAtk.value / 1000;
+    vAtk.textContent = sAtk.value + " ms";
+    tAtk.textContent = attack.toFixed(3) + "s";
+  });
+  sRel.addEventListener("input", () => {
+    release = +sRel.value / 1000;
+    vRel.textContent = sRel.value + " ms";
+    tRel.textContent = release.toFixed(3) + "s";
+  });
+  sLvl.addEventListener("input", () => {
+    manual = +sLvl.value / 100;
+    vLvl.textContent = manual === 0 ? "idle" : Math.round(manual * 100) + "%";
+  });
+
+  const lamp = document.getElementById("lamp");
+  const kRec = document.getElementById("kRec"), kStop = document.getElementById("kStop");
+
+  kRec.addEventListener("click", () => { recording = true; elapsed = 0; });
+  kStop.addEventListener("click", () => { recording = false; });
+
+  function frame(now) {
+    const dt = Math.min((now - last) / 1000, 0.1);
+    last = now;
+
+    // Input: manual override, else a simulated speech envelope while recording.
+    if (manual > 0) {
+      level = manual;
+    } else if (recording) {
+      burst -= dt;
+      if (burst <= 0) { burst = 0.18 + Math.random() * 0.5; level = 0.25 + Math.random() * 0.72; }
+    } else {
+      level = 0;
+    }
+
+    // One-pole follower, separate constants each direction.
+    const tau = level > shown ? attack : release;
+    shown += (level - shown) * (1 - Math.exp(-dt / tau));
+
+    needle.setAttribute("transform", `rotate(${angleFor(shown).toFixed(2)} ${PIVOT_X} ${PIVOT_Y})`);
+
+    if (recording) {
+      elapsed += dt;
+      lamp.classList.toggle("on", Math.floor(elapsed / (1.1 / 2)) % 2 === 0);
+    } else {
+      lamp.classList.remove("on");
+    }
+    renderLed(elapsed);
+
+    requestAnimationFrame(frame);
+  }
+  renderLed(0);
+  if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    requestAnimationFrame(frame);
+  }
+})();
+</script>
