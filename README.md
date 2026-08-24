@@ -1,13 +1,9 @@
-<img src="YouFlow/Resources/LogoMark.png" width="96" align="left" alt="">
-
-
+<img src="YouFlow/Resources/LogoMark.png" width="88" alt="">
 
 # UFlow
 
 Dictation for macOS that looks like a boombox.
-Press a key, talk, press it again. The text lands where your cursor was Instantly.
-
-<br clear="left">
+Press a key, talk, press it again. The text lands where your cursor was, instantly.
 
 ### Too broke for Wispr Flow? Same. That's the entire origin story.
 
