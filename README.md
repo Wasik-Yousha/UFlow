@@ -91,7 +91,7 @@ macOS puts a quarantine flag on anything a browser downloads, and Gatekeeper won
 
 </details>
 
-If you'd rather use the download button: grab the `.dmg` from [Download UFlow 1.0](https://github.com/Wasik-Yousha/UFlow/releases/latest)** , drag UFlow to Applications, try to open it, get refused, Click Done.
+If you'd rather use the download button: grab the `.dmg` from [Download UFlow 1.0](https://github.com/Wasik-Yousha/UFlow/releases/latest) , drag UFlow to Applications, try to open it, get refused, Click Done.
 
 ⚠️ Not "Move to Trash" — Apple styles the destructive button green and makes it the visually obvious one.
 
