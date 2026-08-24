@@ -2,7 +2,7 @@
 #
 # UFlow installer.
 #
-#   curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/Wasik-Yousha/UFlow/main/scripts/install.sh | bash
 #
 # Downloads the latest release, installs to /Applications, and launches it.
 #

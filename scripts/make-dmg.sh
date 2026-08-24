@@ -50,7 +50,7 @@ UFlow
    To skip that step entirely next time, install from a terminal instead --
    downloads made with curl are not quarantined, so nothing blocks them:
 
-       curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/scripts/install.sh | bash
+       curl -fsSL https://raw.githubusercontent.com/Wasik-Yousha/UFlow/main/scripts/install.sh | bash
 
 3. UFlow needs three permissions, and will ask for each one:
 
