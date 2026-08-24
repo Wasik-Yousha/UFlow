@@ -5,7 +5,7 @@
 <h1 align="center">UFlow</h1>
 
 Dictation for macOS that looks like a boombox.
-Press a key, talk, press it again. The text lands where your cursor was, instantly.
+Press Fn+y key,   talk,   press it again to STOP. The text lands where your cursor was, instantly.
 
 ### Too broke for Wispr Flow? Same. That's the entire origin story.
 
