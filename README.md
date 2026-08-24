@@ -218,8 +218,4 @@ YouFlow/Sources/
 
 ---
 
-<div align="center">
 
-Built with [Claude Code](https://claude.com/claude-code).
-
-</div>
