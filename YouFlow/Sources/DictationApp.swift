@@ -55,8 +55,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuBarObserver: NSObjectProtocol?
 
     func applicationWillFinishLaunching(_ notification: Notification) {
-        // A real app: Dock icon, app switcher, standard window.
-        NSApp.setActivationPolicy(.regular)
+        // Background agent: menu bar presence, no Dock icon, no activation.
+        // Fn+Y must feel like a system feature, not like switching apps.
+        // (Snapshot runs stay regular so the capture window behaves normally.)
+        #if DEBUG
+        NSApp.setActivationPolicy(Snapshot.isActive ? .regular : .accessory)
+        #else
+        NSApp.setActivationPolicy(.accessory)
+        #endif
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -89,6 +95,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        // Launch-at-login is what makes Fn+Y "always work": the process is
+        // simply there after every reboot, without anyone opening anything.
+        state.settings.reconcileLoginItem()
+
+        // SwiftUI orders the main window in at launch. An agent app must not
+        // surface a window uninvited, so send it away once it exists. Opening
+        // stays possible any time from the menu bar ("Open UFlow") or via
+        // `open -a UFlow`, both of which land in `showMainWindow`.
+        #if DEBUG
+        if !Snapshot.isActive {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { Self.hideMainWindows() }
+        }
+        #else
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { Self.hideMainWindows() }
+        #endif
+
         #if DEBUG
         if Snapshot.isActive {
             // A snapshot run must not raise permission prompts or touch audio.
@@ -100,13 +122,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { await state.bootstrap() }
     }
 
+    /// Orders every main window off screen without destroying its scene, so a
+    /// later "Open UFlow" brings the same window straight back.
+    @MainActor private static func hideMainWindows() {
+        for window in NSApp.windows where window.canBecomeMain && !(window is NSPanel) {
+            window.orderOut(nil)
+        }
+    }
+
+    /// Brings the main window forward, recreating it if SwiftUI discarded it.
+    @MainActor private func showMainWindows() {
+        NSApp.activate(ignoringOtherApps: true)
+        var shown = false
+        for window in NSApp.windows where window.canBecomeMain && !(window is NSPanel) {
+            window.makeKeyAndOrderFront(nil)
+            shown = true
+        }
+        if !shown {
+            // The scene was never created (or was released); this asks AppKit
+            // to restore the app's standard windows.
+            NSApp.sendAction(#selector(NSApplication.arrangeInFront(_:)), to: nil, from: nil)
+        }
+    }
+
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
         true
     }
 
-    /// Clicking the Dock icon brings the window back.
+    /// Double-clicking the app (or `open -a UFlow`) reveals the window rather
+    /// than doing nothing — the one moment surfacing UI is what was asked for.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        true
+        if !flag { showMainWindows() }
+        return true
     }
 
     /// Closing the window leaves the menu bar item and the global hotkey

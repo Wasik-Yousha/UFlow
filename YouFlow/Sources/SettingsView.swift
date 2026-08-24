@@ -80,6 +80,10 @@ struct SettingsView: View {
                     get: { app.settings.showMenuBarItem },
                     set: { app.settings.showMenuBarItem = $0 }
                 ))
+                Toggle("Launch at login", isOn: Binding(
+                    get: { app.settings.launchAtLogin },
+                    set: { app.settings.launchAtLogin = $0 }
+                ))
             } header: {
                 Text("Interface")
             } footer: {

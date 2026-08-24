@@ -66,8 +66,8 @@ struct TranscriptionsView: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: Tok.S.s8) {
-                        ForEach(Array(results.enumerated()), id: \.element.id) { index, record in
-                            TranscriptRow(record: record, accent: Tok.Brand.cycled(index))
+                        ForEach(results, id: \.id) { record in
+                            TranscriptRow(record: record, accent: Tok.Brand.vermilion)
                                 .transition(.opacity)
                         }
                     }

@@ -1,6 +1,7 @@
 import AppKit
 import Carbon.HIToolbox
 import Foundation
+import ServiceManagement
 
 // =============================================================================
 // MARK: - Where things live
@@ -410,6 +411,7 @@ final class AppSettings: ObservableObject {
         static let sound = "ui.soundEnabled"
         static let menuBar = "ui.menuBarItem"
         static let appearance = "ui.appearance"
+        static let launchAtLogin = "ui.launchAtLogin"
     }
 
     private let defaults = UserDefaults.standard
@@ -433,16 +435,49 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    /// Keeps the process resident across reboots, which is what makes Fn+Y
+    /// work "without opening the app" — nobody opens anything; it is simply
+    /// always there. The system records the running bundle's location.
+    @Published var launchAtLogin: Bool {
+        didSet {
+            defaults.set(launchAtLogin, forKey: Key.launchAtLogin)
+            reconcileLoginItem()
+        }
+    }
+
     init() {
         modifierKeyCode = defaults.object(forKey: Key.modifier) as? Int ?? kVK_Function
         triggerKeyCode = defaults.object(forKey: Key.trigger) as? Int ?? kVK_ANSI_Y
         backend = (defaults.string(forKey: Key.backend).flatMap(BackendPreference.init(rawValue:))) ?? .automatic
         soundEnabled = defaults.object(forKey: Key.sound) as? Bool ?? true
         showMenuBarItem = defaults.object(forKey: Key.menuBar) as? Bool ?? true
+        launchAtLogin = defaults.object(forKey: Key.launchAtLogin) as? Bool ?? true
         appearance = (defaults.string(forKey: Key.appearance)
             .flatMap(AppearancePreference.init(rawValue:))) ?? .system
         SoundKit.isEnabled = soundEnabled
         applyAppearance()
+    }
+
+    /// Makes the system's login-item state agree with the stored preference.
+    /// Safe to call repeatedly; each call is a cheap status check in the common
+    /// already-in-agreement case.
+    func reconcileLoginItem() {
+        let service = SMAppService.mainApp
+        do {
+            switch service.status {
+            case .notRegistered where launchAtLogin:
+                try service.register()
+                Log.app.info("Registered as login item")
+            case .enabled where !launchAtLogin:
+                try service.unregister()
+                Log.app.info("Unregistered login item")
+            default:
+                break
+            }
+        } catch {
+            // A refused registration must never block launch or dictation.
+            Log.app.error("Login item update failed: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     /// Applies the chosen look to every window the app owns.
