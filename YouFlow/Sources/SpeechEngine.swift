@@ -103,12 +103,16 @@ enum BackendPreference: String, CaseIterable, Codable, Sendable {
     case streaming
     /// Force the short-form dictation transcriber.
     case dictation
+    /// NVIDIA Parakeet on CoreML. The fallback for Macs without
+    /// `SpeechAnalyzer`, selectable anywhere so it can be tested.
+    case parakeet
 
     var label: String {
         switch self {
         case .automatic: "Automatic"
         case .streaming: "Apple streaming transcriber"
         case .dictation: "Apple dictation transcriber"
+        case .parakeet: "Parakeet (NVIDIA, on-device)"
         }
     }
 
@@ -117,8 +121,13 @@ enum BackendPreference: String, CaseIterable, Codable, Sendable {
         case .automatic: "Use the streaming transcriber when this Mac supports it."
         case .streaming: "Best for long dictation. Revises text as you speak."
         case .dictation: "Tuned for short phrases. Use if streaming is unavailable."
+        case .parakeet: "Runs on the Neural Engine. Downloads a 600 MB model once, then works offline. Decodes when you stop rather than as you speak."
         }
     }
+
+    /// True for backends that are not Apple's, and so do not live behind
+    /// `SpeechAnalyzer`'s availability.
+    var usesParakeet: Bool { self == .parakeet }
 }
 
 // MARK: - Engine

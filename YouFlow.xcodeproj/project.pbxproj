@@ -29,6 +29,8 @@
 		A10000000000000000000014 /* AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000014 /* AppIcon.icns */; };
 		A10000000000000000000015 /* LogoMark.png in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000015 /* LogoMark.png */; };
 		A10000000000000000000016 /* NamePlate.png in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000016 /* NamePlate.png */; };
+		AB0000000000000000000003 /* FluidAudio in Frameworks */ = {isa = PBXBuildFile; productRef = AB0000000000000000000002 /* FluidAudio */; };
+		A10000000000000000000017 /* ParakeetEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000017 /* ParakeetEngine.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -57,6 +59,7 @@
 		A20000000000000000000014 /* AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = AppIcon.icns; sourceTree = "<group>"; };
 		A20000000000000000000015 /* LogoMark.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = LogoMark.png; sourceTree = "<group>"; };
 		A20000000000000000000016 /* NamePlate.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = NamePlate.png; sourceTree = "<group>"; };
+		A20000000000000000000017 /* ParakeetEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParakeetEngine.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -64,6 +67,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AB0000000000000000000003 /* FluidAudio in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -98,6 +102,7 @@
 		A50000000000000000000004 /* Sources */ = {
 			isa = PBXGroup;
 			children = (
+				A20000000000000000000017 /* ParakeetEngine.swift */,
 				A20000000000000000000013 /* SettingsView.swift */,
 				A20000000000000000000012 /* MainWindowView.swift */,
 				A20000000000000000000011 /* DictionaryView.swift */,
@@ -149,11 +154,33 @@
 			dependencies = (
 			);
 			name = YouFlow;
+			packageProductDependencies = (
+				AB0000000000000000000002 /* FluidAudio */,
+			);
 			productName = YouFlow;
 			productReference = A30000000000000000000001 /* UFlow.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		AB0000000000000000000001 /* XCRemoteSwiftPackageReference "FluidAudio" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/FluidInference/FluidAudio.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.15.6;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		AB0000000000000000000002 /* FluidAudio */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AB0000000000000000000001 /* XCRemoteSwiftPackageReference "FluidAudio" */;
+			productName = FluidAudio;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin PBXProject section */
 		A90000000000000000000001 /* Project object */ = {
@@ -177,6 +204,9 @@
 				Base,
 			);
 			mainGroup = A50000000000000000000001;
+			packageReferences = (
+				AB0000000000000000000001 /* XCRemoteSwiftPackageReference "FluidAudio" */,
+			);
 			productRefGroup = A50000000000000000000003 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -204,6 +234,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A10000000000000000000017 /* ParakeetEngine.swift in Sources */,
 				A10000000000000000000013 /* SettingsView.swift in Sources */,
 				A10000000000000000000012 /* MainWindowView.swift in Sources */,
 				A10000000000000000000011 /* DictionaryView.swift in Sources */,

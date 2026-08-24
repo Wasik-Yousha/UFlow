@@ -1,6 +1,8 @@
-<img src="YouFlow/Resources/LogoMark.png" width="88" alt="">
+<p align="center">
+  <img src="YouFlow/Resources/LogoMark.png" width="88" alt="">
+</p>
 
-# UFlow
+<h1 align="center">UFlow</h1>
 
 Dictation for macOS that looks like a boombox.
 Press a key, talk, press it again. The text lands where your cursor was, instantly.
