@@ -7,13 +7,19 @@ Press a key, talk, press it again. The text lands where your cursor was.
 
 <br clear="left">
 
-**[Download UFlow 1.0](https://github.com/Wasik-Yousha/UFlow/releases/latest)** · macOS 26+ · Apple Silicon · nothing leaves your Mac
+### Too broke for Wispr Flow? Same. That's the entire origin story.
+
+**Free.** Not free-trial, not free-tier, not free-until-we-raise-a-Series-A. There is nothing to subscribe to, no account to make, and no server to send your voice to, because there is no server.
+
+**Fast.** The model runs on your Mac, not on somebody's GPU in Virginia. Transcription happens while you're still talking, so the text is already waiting when you stop. No upload, no queue, no spinner.
+
+**[Download UFlow 1.0](https://github.com/Wasik-Yousha/UFlow/releases/latest)** · macOS 26+ · Apple Silicon · your voice never leaves the machine
 
 <img src="docs/deck.png" width="820" alt="">
 
-## Why this exists
+## Why it looks like this
 
-I wanted to talk instead of type, and I wanted the thing doing it to not be a subscription, not phone home, and not look like every other menu bar utility. So it runs on Apple's on-device speech models and it's shaped like the stereo I grew up with.
+Every dictation app is a grey pill in the menu bar. I didn't want another one, so this is shaped like the stereo I grew up with.
 
 The VU needle is real, by the way. It reads your actual mic level, with proper ballistics — fast attack, slow release — so quiet speech still moves it. Getting that to feel right took longer than the transcription did.
 
