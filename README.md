@@ -5,7 +5,7 @@
 # UFlow
 
 Dictation for macOS that looks like a boombox.
-Press a key, talk, press it again. The text lands where your cursor was.
+Press a key, talk, press it again. The text lands where your cursor was Instantly.
 
 <br clear="left">
 
@@ -123,10 +123,6 @@ Or just open the project in Xcode and hit Run.
 ## How it was built
 
 Built with a **DeepSeek harness** driving the **Ox Alpha** model through **[OpenRouter](https://openrouter.ai)**, and debugged with **[Claude Code](https://claude.com/claude-code)**.
-
-Every colour, size, duration and sound in the app comes out of one file, [`DesignTokens.swift`](YouFlow/Sources/DesignTokens.swift). Views read from `Tok.*` and nothing hardcodes a hex value. The brand colours are sampled from the app icon rather than picked by eye — vermilion `#D5391B`, teal `#0A444F`, amber `#E88E14`, cream `#FDF1D3` — and the chassis colours came out of the reference images the same way.
-
-There's a readable version of the whole system in `UFlow-Design-Tokens.html`, including a live VU meter you can drag to tune the needle's attack and release.
 
 <details>
 <summary>Where things are</summary>
