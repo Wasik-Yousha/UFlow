@@ -1,5 +1,7 @@
 <img src="YouFlow/Resources/LogoMark.png" width="96" align="left" alt="">
 
+
+
 # UFlow
 
 Dictation for macOS that looks like a boombox.
@@ -9,7 +11,7 @@ Press a key, talk, press it again. The text lands where your cursor was.
 
 ### Too broke for Wispr Flow? Same. That's the entire origin story.
 
-**Free.** Not free-trial, not free-tier, not free-until-we-raise-a-Series-A. There is nothing to subscribe to, no account to make, and no server to send your voice to, because there is no server.
+**Free.** Not free-trial, not free-tier. There is nothing to subscribe to, no account to make, and no server to send your voice to, because there is no server.
 
 **Fast.** The model runs on your Mac, not on somebody's GPU in Virginia. Transcription happens while you're still talking, so the text is already waiting when you stop. No upload, no queue, no spinner.
 
