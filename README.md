@@ -86,6 +86,15 @@ To package a disk image:
 ./scripts/make-dmg.sh      # -> dist/UFlow-1.0.dmg
 ```
 
+To cut a release once the repo exists:
+
+```sh
+./scripts/make-dmg.sh
+gh release create v1.0 dist/UFlow-1.0.dmg \
+   --title "UFlow 1.0" \
+   --notes "Install: curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/scripts/install.sh | bash"
+```
+
 ### Permissions
 
 On first launch macOS will ask for three things. All are required:
@@ -101,24 +110,42 @@ signing identity makes macOS treat it as a new app, and you will be asked
 again — remove the stale entry in System Settings ▸ Privacy & Security if it
 starts refusing.
 
-## Opening it on someone else's Mac
+## Install
 
-The released `.dmg` is signed with a self-signed certificate, not an Apple
-Developer ID, and it is not notarized. macOS will refuse to open it on first
-run. This is expected, and there are two ways past it:
+**One line, no warnings:**
 
-**Either** — after dragging UFlow to Applications and trying to open it once,
-go to **System Settings ▸ Privacy & Security**, scroll down, and click
-**Open Anyway** next to the message about UFlow.
+```sh
+curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/scripts/install.sh | bash
+```
 
-**Or** — strip the download quarantine flag from a terminal:
+This downloads the latest release, installs it to `/Applications`, and opens
+it. macOS attaches a quarantine flag to *browser* downloads and Gatekeeper
+refuses to open an app carrying one unless Apple has notarized it — `curl`
+does not set that flag, so this route just works.
+
+**Or download the `.dmg`** from the Releases page and drag UFlow to
+Applications. That path *does* get quarantined, so see below.
+
+## Opening a downloaded .dmg
+
+UFlow is signed with a self-signed certificate rather than an Apple Developer
+ID, and it is not notarized, so a browser-downloaded copy is blocked on first
+open. The image ships a `Read Me First.txt` saying the same thing. Two ways
+past it:
+
+**Either** — try to open UFlow once, then go to **System Settings ▸ Privacy &
+Security**, scroll down, and click **Open Anyway** next to the message about
+UFlow.
+
+**Or** — clear the quarantine flag yourself:
 
 ```sh
 xattr -dr com.apple.quarantine /Applications/UFlow.app
 ```
 
-On recent macOS versions, right-click ▸ Open no longer works for unnotarized
-apps; use one of the two above.
+On recent macOS versions right-click ▸ Open no longer works for unnotarized
+apps, so use one of those two — or the `curl` line above, which avoids the
+situation entirely.
 
 To remove this friction properly you need an
 [Apple Developer Program](https://developer.apple.com/programs/) membership
