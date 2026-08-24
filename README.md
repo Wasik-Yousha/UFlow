@@ -1,4 +1,4 @@
-                                 <img src="YouFlow/Resources/LogoMark.png" width="88" alt="">
+<img src="YouFlow/Resources/LogoMark.png" width="88" alt="">
 
 # UFlow
 
