@@ -72,7 +72,12 @@ actor ParakeetEngine: TranscriptionEngine {
 
     /// Whether the weights are already on disk, so the UI can tell the
     /// difference between "will take four minutes" and "will take four seconds".
-    static var modelsAreDownloaded: Bool {
+    ///
+    /// ponytail: "non-empty directory" is the whole test, so a download killed
+    /// halfway still reads as present. `prepare()` re-fetches what is missing,
+    /// so the cost is a briefly wrong label rather than a broken engine. Verify
+    /// the individual model files if that ever stops being true.
+    nonisolated static var modelsAreDownloaded: Bool {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("FluidAudio/Models", isDirectory: true)
         guard let contents = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else {

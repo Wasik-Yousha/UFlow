@@ -71,6 +71,11 @@ final class AppState: ObservableObject, StatusInfoProvider {
     /// ~600 MB, so this is the difference between a progress bar and a hang.
     @Published private(set) var modelDownloadProgress: Double?
 
+    /// Whether Parakeet's weights are already on disk. Mirrored into a
+    /// published property because the on-disk check is a plain filesystem
+    /// look and would never tell SwiftUI it had changed.
+    @Published private(set) var parakeetModelIsDownloaded = ParakeetEngine.modelsAreDownloaded
+
     var isRecording: Bool { state == .recording }
     var isBusy: Bool { state == .transcribing || state == .injecting }
     var isFaulted: Bool {
@@ -194,6 +199,14 @@ final class AppState: ObservableObject, StatusInfoProvider {
         Log.app.info("Bootstrap finished in state \(String(describing: self.state), privacy: .public)")
     }
 
+    /// Fetch Parakeet's weights on demand, so Settings can offer the download
+    /// as a deliberate act instead of having 600 MB start silently the first
+    /// time someone presses the hotkey.
+    func downloadParakeetModel() {
+        guard settings.backend.usesParakeet, modelDownloadProgress == nil else { return }
+        Task { await prepareEngineIfPossible() }
+    }
+
     private func prepareEngineIfPossible() async {
         do {
             let usingParakeet = settings.backend.usesParakeet
@@ -208,12 +221,14 @@ final class AppState: ObservableObject, StatusInfoProvider {
             })
             enginePrepared = true
             modelDownloadProgress = nil
+            parakeetModelIsDownloaded = ParakeetEngine.modelsAreDownloaded
             engineDetailText = "On-device English transcription"
             engineName = await engine.activeBackendName
             Log.speech.info("Engine prepared")
         } catch {
             enginePrepared = false
             modelDownloadProgress = nil
+            parakeetModelIsDownloaded = ParakeetEngine.modelsAreDownloaded
             engineDetailText = "Engine unavailable"
             if case .initializing = state {
                 state = .unavailable(error.localizedDescription)

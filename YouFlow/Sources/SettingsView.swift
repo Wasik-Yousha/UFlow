@@ -50,6 +50,10 @@ struct SettingsView: View {
                 Text(app.settings.backend.detail)
                     .font(.callout)
                     .foregroundStyle(.secondary)
+
+                if app.settings.backend.usesParakeet {
+                    parakeetModelRow
+                }
             } header: {
                 Text("Model")
             } footer: {
@@ -102,4 +106,31 @@ struct SettingsView: View {
         .frame(width: 460)
         .fixedSize(horizontal: false, vertical: true)
     }
+
+    /// Parakeet's weights are a 600 MB download that happens once. Without this
+    /// the transfer starts silently on the next recording, which reads as a hang.
+    @ViewBuilder
+    private var parakeetModelRow: some View {
+        if let fraction = app.modelDownloadProgress {
+            VStack(alignment: .leading, spacing: 4) {
+                ProgressView(value: fraction)
+                Text("Downloading model… \(Int(fraction * 100))%")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+        } else if app.parakeetModelIsDownloaded {
+            Label("Model downloaded", systemImage: "checkmark.circle.fill")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        } else {
+            HStack {
+                Text("Model not downloaded yet")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Download") { app.downloadParakeetModel() }
+            }
+        }
+    }
+
 }
