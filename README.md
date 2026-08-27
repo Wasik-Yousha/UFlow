@@ -180,4 +180,10 @@ Light and dark, switchable in Settings independently of the system:
 
 ---
 
+## License
+
+[Apache License 2.0](LICENSE). Fork it, ship it, sell it — keep the notice and don't use the name to imply endorsement. Pull requests welcome; merges go through me.
+
+---
+
 <sub>Built with a DeepSeek harness driving the Ox Alpha model through OpenRouter · debugged with Claude Code</sub>
