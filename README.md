@@ -108,6 +108,21 @@ Or skip all of that from a terminal:
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Wasik-Yousha/UFlow/main/scripts/install.sh | bash
 ```
+### Verifying the download
+
+Every release ships a `SHA256SUMS` next to the `.dmg`. The installer script checks it
+automatically; if you downloaded by hand, check it yourself from the folder the `.dmg`
+landed in:
+
+```sh
+cd ~/Downloads
+shasum -a 256 -c <(curl -fsSL https://github.com/Wasik-Yousha/UFlow/releases/latest/download/SHA256SUMS)
+```
+
+`UFlow-1.0.dmg: OK` means the file you have is byte-for-byte the one that was built here.
+It confirms the download arrived intact — it is not a signature, and it is not a substitute
+for notarization. If it ever says `FAILED`, don't install it.
+
 ### It'll ask for three permissions
 
 | | Why it needs it |
@@ -182,7 +197,12 @@ Light and dark, switchable in Settings independently of the system:
 
 ## License
 
-[Apache License 2.0](LICENSE). Fork it, ship it, sell it — keep the notice and don't use the name to imply endorsement. Pull requests welcome; merges go through me.
+[Apache License 2.0](LICENSE). Fork it, ship it, sell it — keep the notice and don't use the name to imply endorsement.
+
+Issues and pull requests are welcome. This is a one-person project I maintain around other
+work, so expect a slow reply rather than no reply, and don't be surprised if a PR sits for a
+couple of weeks. Every merge goes through me. If something is urgent to you, fork it — the
+license exists precisely so you never have to wait on me.
 
 ---
 

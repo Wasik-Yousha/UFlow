@@ -54,6 +54,19 @@ else
     CLEANUP_DMG=1
     say "Downloading $(basename "$url")"
     curl -fL# "$url" -o "$DMG"
+
+    # Verify against the SHA256SUMS published with the release. This catches a
+    # truncated or corrupted download; it is not a signature, since both files
+    # come from the same place. Real authenticity needs notarization.
+    sums_url="${url%/*}/SHA256SUMS"
+    if expected="$(curl -fsSL "$sums_url" 2>/dev/null | grep -F "$(basename "$url")" | cut -d' ' -f1)" \
+       && [ -n "$expected" ]; then
+        actual="$(shasum -a 256 "$DMG" | cut -d' ' -f1)"
+        [ "$actual" = "$expected" ] || die "Checksum mismatch — expected $expected, got $actual. Not installing."
+        say "Checksum verified"
+    else
+        warn "No SHA256SUMS published for this release; skipping checksum check."
+    fi
 fi
 
 # ---------------------------------------------------------------- install

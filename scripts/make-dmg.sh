@@ -83,6 +83,9 @@ rm -f "$OUT"
 hdiutil create -volname "UFlow" -srcfolder "$STAGE" -ov -format UDZO "$OUT" >/dev/null
 rm -rf "$STAGE"
 
+# Checksum, so a download can be checked against what was actually built here.
+(cd "$ROOT/dist" && shasum -a 256 "$(basename "$OUT")" > SHA256SUMS)
+
 echo "==> Done: $OUT"
 codesign -dv --verbose=2 "$APP" 2>&1 | grep -E "Authority|TeamIdentifier" || true
 echo
