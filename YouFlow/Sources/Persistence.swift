@@ -439,9 +439,22 @@ final class AppSettings: ObservableObject {
 
     private let defaults = UserDefaults.standard
 
+    /// Stored as `Self.noLetterSentinel` in defaults when nil, so "Fn alone"
+    /// shares the one Int-typed key rather than needing a second default to
+    /// distinguish "never configured" from "explicitly no letter".
+    private static let noLetterSentinel = -1
+
     @Published var modifierKeyCode: Int { didSet { defaults.set(modifierKeyCode, forKey: Key.modifier) } }
-    @Published var triggerKeyCode: Int { didSet { defaults.set(triggerKeyCode, forKey: Key.trigger) } }
+    @Published var triggerKeyCode: Int? {
+        didSet { defaults.set(triggerKeyCode ?? Self.noLetterSentinel, forKey: Key.trigger) }
+    }
     @Published var hotkeyMode: HotkeyMode { didSet { defaults.set(hotkeyMode.rawValue, forKey: Key.mode) } }
+
+    /// The mode actually used at trigger time. Fn held alone is forced to
+    /// hold-to-talk: a toggle would fire on every incidental tap of Fn (input
+    /// source switching, emoji panel muscle memory) since there's no second
+    /// key to disambiguate an intentional press.
+    var effectiveHotkeyMode: HotkeyMode { triggerKeyCode == nil ? .hold : hotkeyMode }
     @Published var backend: BackendPreference { didSet { defaults.set(backend.rawValue, forKey: Key.backend) } }
     @Published var showMenuBarItem: Bool { didSet { defaults.set(showMenuBarItem, forKey: Key.menuBar) } }
 
@@ -471,7 +484,8 @@ final class AppSettings: ObservableObject {
 
     init() {
         modifierKeyCode = defaults.object(forKey: Key.modifier) as? Int ?? kVK_Function
-        triggerKeyCode = defaults.object(forKey: Key.trigger) as? Int ?? kVK_ANSI_Y
+        let storedTrigger = defaults.object(forKey: Key.trigger) as? Int ?? kVK_ANSI_Y
+        triggerKeyCode = storedTrigger == Self.noLetterSentinel ? nil : storedTrigger
         hotkeyMode = (defaults.string(forKey: Key.mode).flatMap(HotkeyMode.init(rawValue:))) ?? .toggle
         backend = (defaults.string(forKey: Key.backend).flatMap(BackendPreference.init(rawValue:))) ?? .automatic
         soundEnabled = defaults.object(forKey: Key.sound) as? Bool ?? true

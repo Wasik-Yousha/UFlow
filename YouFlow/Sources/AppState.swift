@@ -122,15 +122,6 @@ final class AppState: ObservableObject, StatusInfoProvider {
                 self?.applyBackend(preference)
             }
             .store(in: &cancellables)
-
-        // The event tap can only be created once Input Monitoring is granted.
-        // Granting it after a failed bootstrap attempt doesn't retroactively
-        // fix that attempt, so retry every time permission state changes
-        // (e.g. after the user grants it in System Settings and comes back).
-        permissionManager.$state
-            .dropFirst()
-            .sink { [weak self] _ in self?.attemptHotkeyInstall() }
-            .store(in: &cancellables)
     }
 
     func attachStatusBar(_ controller: StatusBarController) {
@@ -168,18 +159,29 @@ final class AppState: ObservableObject, StatusInfoProvider {
         Log.app.info("Bootstrap finished in state \(String(describing: self.state), privacy: .public)")
     }
 
+    private var hotkeyRetryTimer: Timer?
+
     /// (Re)tries installing the global event tap. Safe to call repeatedly:
-    /// a no-op once the tap already exists. Called at bootstrap and again
-    /// whenever permission state changes, since Input Monitoring granted
-    /// after a failed `install()` doesn't retroactively fix that attempt.
+    /// a no-op once the tap already exists. Called at bootstrap and, on
+    /// failure, on a timer — Input Monitoring granted after a failed
+    /// `install()` doesn't retroactively fix that attempt, and nothing else
+    /// forces the app to notice the grant, so Fn+Y would otherwise stay dead
+    /// until the process is relaunched by hand.
     private func attemptHotkeyInstall() {
-        guard !hotkeyManager.isInstalled else { return }
+        guard !hotkeyManager.isInstalled else {
+            hotkeyRetryTimer?.invalidate()
+            hotkeyRetryTimer = nil
+            return
+        }
         switch state {
         case .initializing, .unavailable: break
         case .ready, .recording, .transcribing, .injecting, .error: return
         }
 
+        permissionManager.refresh()
         if hotkeyManager.install() {
+            hotkeyRetryTimer?.invalidate()
+            hotkeyRetryTimer = nil
             if enginePrepared && permissionManager.state.allGranted {
                 state = .ready
             } else if !enginePrepared {
@@ -190,6 +192,11 @@ final class AppState: ObservableObject, StatusInfoProvider {
             }
         } else {
             state = .unavailable("Input Monitoring permission required")
+            if hotkeyRetryTimer == nil {
+                hotkeyRetryTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
+                    Task { @MainActor in self?.attemptHotkeyInstall() }
+                }
+            }
         }
     }
 
@@ -248,7 +255,7 @@ final class AppState: ObservableObject, StatusInfoProvider {
 
     private func handleTriggerDown() {
         // Toggle mode: a second tap while recording stops the session.
-        if settings.hotkeyMode == .toggle, sessionTask != nil {
+        if settings.effectiveHotkeyMode == .toggle, sessionTask != nil {
             if state == .recording {
                 Log.hotkey.info("Toggle: second tap — stopping session")
                 SoundKit.play(.stopDown)
@@ -312,7 +319,7 @@ final class AppState: ObservableObject, StatusInfoProvider {
 
         // In toggle mode the UP edge merely completes the starting tap; the
         // session keeps recording until the next tap arrives.
-        guard settings.hotkeyMode == .hold else { return }
+        guard settings.effectiveHotkeyMode == .hold else { return }
 
         if let started = pressStartedAt,
            ContinuousClock.now - started < Self.minimumPressDuration {

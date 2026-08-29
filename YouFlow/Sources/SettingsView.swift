@@ -21,8 +21,9 @@ struct SettingsView: View {
                     get: { app.settings.triggerKeyCode },
                     set: { app.settings.triggerKeyCode = $0 }
                 )) {
+                    Text("Nothing — Fn alone").tag(Int?.none)
                     ForEach(HotkeyManager.Trigger.letterKeys, id: \.code) { key in
-                        Text(key.name).tag(key.code)
+                        Text(key.name).tag(Optional(key.code))
                     }
                 }
 
@@ -41,11 +42,17 @@ struct SettingsView: View {
                     }
                 }
                 .pickerStyle(.segmented)
+                .disabled(app.settings.triggerKeyCode == nil)
             } header: {
                 Text("Hotkey")
             } footer: {
-                Text(app.settings.hotkeyMode.detail + " Works in any app; the text is typed where you were.")
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(app.settings.effectiveHotkeyMode.detail + " Works in any app; the text is typed where you were.")
+                    if app.settings.triggerKeyCode == nil {
+                        Text("Fn alone always holds — as a toggle it would fire on every incidental tap.")
+                    }
+                }
+                .foregroundStyle(.secondary)
             }
 
             Section {

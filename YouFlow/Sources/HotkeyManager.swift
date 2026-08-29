@@ -33,8 +33,9 @@ final class HotkeyManager {
         /// The modifier key tracked via `flagsChanged`. Fn/Globe by default:
         /// it has no system binding of its own when paired with a letter.
         var modifierKeyCode: Int = kVK_Function
-        /// The letter key that completes the chord.
-        var triggerKeyCode: Int = kVK_ANSI_Y
+        /// The letter that completes the chord. `nil` means the modifier is
+        /// the whole trigger — e.g. holding Fn alone with no paired key.
+        var triggerKeyCode: Int? = kVK_ANSI_Y
 
         /// The event flag the chosen modifier raises. Driven off the key code
         /// so the two can never disagree.
@@ -48,7 +49,10 @@ final class HotkeyManager {
             }
         }
 
-        var displayName: String { "\(Self.modifierName(modifierKeyCode)) + \(Self.keyName(triggerKeyCode))" }
+        var displayName: String {
+            guard let triggerKeyCode else { return Self.modifierName(modifierKeyCode) }
+            return "\(Self.modifierName(modifierKeyCode)) + \(Self.keyName(triggerKeyCode))"
+        }
 
         static func modifierName(_ code: Int) -> String {
             switch code {
@@ -216,7 +220,7 @@ final class HotkeyManager {
             return false
 
         case .keyDown:
-            guard keyCode == trigger.triggerKeyCode else { return false }
+            guard let triggerKeyCode = trigger.triggerKeyCode, keyCode == triggerKeyCode else { return false }
             // Only treat the letter as part of the chord when the modifier is
             // in play. Typing that letter normally passes through untouched.
             guard isModifierDown || event.flags.contains(trigger.modifierFlag) else { return false }
@@ -226,7 +230,7 @@ final class HotkeyManager {
             return true
 
         case .keyUp:
-            guard keyCode == trigger.triggerKeyCode else { return false }
+            guard let triggerKeyCode = trigger.triggerKeyCode, keyCode == triggerKeyCode else { return false }
             guard isTriggerKeyDown else { return false }
             isTriggerKeyDown = false
             evaluate()
@@ -240,7 +244,7 @@ final class HotkeyManager {
 
     /// Recomputes chord state and fires edge callbacks exactly once per transition.
     private func evaluate() {
-        let nowActive = isModifierDown && isTriggerKeyDown
+        let nowActive = trigger.triggerKeyCode == nil ? isModifierDown : (isModifierDown && isTriggerKeyDown)
         guard nowActive != isActive else { return }
         isActive = nowActive
 
