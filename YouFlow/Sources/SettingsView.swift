@@ -21,7 +21,7 @@ struct SettingsView: View {
                     get: { app.settings.triggerKeyCode },
                     set: { app.settings.triggerKeyCode = $0 }
                 )) {
-                    Text("Nothing — Fn alone").tag(Int?.none)
+                    Text("Nothing — \(HotkeyManager.Trigger.modifierName(app.settings.modifierKeyCode)) alone").tag(Int?.none)
                     ForEach(HotkeyManager.Trigger.letterKeys, id: \.code) { key in
                         Text(key.name).tag(Optional(key.code))
                     }
@@ -49,7 +49,10 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(app.settings.effectiveHotkeyMode.detail + " Works in any app; the text is typed where you were.")
                     if app.settings.triggerKeyCode == nil {
-                        Text("Fn alone always holds — as a toggle it would fire on every incidental tap.")
+                        Text("A modifier alone always holds — as a toggle it would fire on every incidental tap.")
+                        if app.settings.modifierKeyCode == kVK_Function {
+                            Text("Fn alone also triggers macOS's own Globe-key action (Emoji & Symbols, by default). Pick Control, Option, or Command above to avoid that, or turn it off in System Settings → Keyboard → Press 🌐 key to → No Action.")
+                        }
                     }
                 }
                 .foregroundStyle(.secondary)
