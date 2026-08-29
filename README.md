@@ -13,7 +13,7 @@ Hold Fn,   talk,   let go to STOP. The text lands where your cursor was, instant
 
 **Fast.** The model runs on your Mac, not on somebody's GPU in Virginia. Transcription happens while you're still talking, so the text is already waiting when you stop. No upload, no queue, no spinner.
 
-**[Download UFlow 1.1](https://github.com/Wasik-Yousha/UFlow/releases/latest)** · macOS 26+ · Apple Silicon · your voice never leaves the machine
+**[Download UFlow 1.1.1](https://github.com/Wasik-Yousha/UFlow/releases/latest)** · macOS 26+ · Apple Silicon · your voice never leaves the machine
 
 <img src="docs/deck.png" width="820" alt="">
 
@@ -107,7 +107,7 @@ Two things happen after that no agent can do on your behalf, because they're OS 
 
 Once granted, UFlow runs as a background menu-bar app with no Dock icon, and **hold `Fn` to talk** is the default hotkey — nothing else to set up.
 
-If you'd rather use the download button: grab the `.dmg` from [Download UFlow 1.1](https://github.com/Wasik-Yousha/UFlow/releases/latest) , drag UFlow to Applications, try to open it, get refused, Click Done.
+If you'd rather use the download button: grab the `.dmg` from [Download UFlow 1.1.1](https://github.com/Wasik-Yousha/UFlow/releases/latest) , drag UFlow to Applications, try to open it, get refused, Click Done.
 
 ⚠️ Not "Move to Trash" — Apple styles the destructive button green and makes it the visually obvious one.
 
@@ -135,7 +135,7 @@ cd ~/Downloads
 shasum -a 256 -c <(curl -fsSL https://github.com/Wasik-Yousha/UFlow/releases/latest/download/SHA256SUMS)
 ```
 
-`UFlow-1.1.dmg: OK` means the file you have is byte-for-byte the one that was built here.
+`UFlow-1.1.1.dmg: OK` means the file you have is byte-for-byte the one that was built here.
 It confirms the download arrived intact — it is not a signature, and it is not a substitute
 for notarization. If it ever says `FAILED`, don't install it.
 
