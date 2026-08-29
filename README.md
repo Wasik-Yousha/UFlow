@@ -5,7 +5,7 @@
 <h1 align="center">UFlow</h1>
 
 Dictation for macOS that looks like a boombox.
-Press Fn+y key,   talk,   press it again to STOP. The text lands where your cursor was, instantly.
+Hold Fn,   talk,   let go to STOP. The text lands where your cursor was, instantly.
 
 ### Too broke for Wispr Flow? Same. That's the entire origin story.
 
@@ -13,7 +13,7 @@ Press Fn+y key,   talk,   press it again to STOP. The text lands where your curs
 
 **Fast.** The model runs on your Mac, not on somebody's GPU in Virginia. Transcription happens while you're still talking, so the text is already waiting when you stop. No upload, no queue, no spinner.
 
-**[Download UFlow 1.0](https://github.com/Wasik-Yousha/UFlow/releases/latest)** · macOS 26+ · Apple Silicon · your voice never leaves the machine
+**[Download UFlow 1.1](https://github.com/Wasik-Yousha/UFlow/releases/latest)** · macOS 26+ · Apple Silicon · your voice never leaves the machine
 
 <img src="docs/deck.png" width="820" alt="">
 
@@ -25,11 +25,13 @@ The VU needle is real, by the way. It reads your actual mic level, with proper b
 
 ## Using it
 
-Hit `Fn`+`Y` anywhere. A small recorder bar appears at the bottom of the screen:
+Hold `Fn` anywhere. A small recorder bar appears at the bottom of the screen:
 
 <img src="docs/hud-dark.png" width="420" alt="">
 
-Say your thing. Hit `Fn`+`Y` again. The bar goes away and your words get typed into whatever you were using — the email, the terminal, the text field. Not the clipboard. Where the cursor actually was.
+Say your thing. Let go of `Fn`. The bar goes away and your words get typed into whatever you were using — the email, the terminal, the text field. Not the clipboard. Where the cursor actually was.
+
+That's the default — hold-to-talk on `Fn` alone, nothing to pair it with. Change the modifier, pair it with a letter, or switch to tap-to-toggle in Settings (`Cmd`+`,`) if you'd rather.
 
 If you'd rather see what you're doing, there's a window with the RECORD and STOP keys, and everything you've dictated:
 
@@ -91,7 +93,21 @@ macOS puts a quarantine flag on anything a browser downloads, and Gatekeeper won
 
 </details>
 
-If you'd rather use the download button: grab the `.dmg` from [Download UFlow 1.0](https://github.com/Wasik-Yousha/UFlow/releases/latest) , drag UFlow to Applications, try to open it, get refused, Click Done.
+### Installing it via an AI coding agent
+
+If you're asking Claude Code, Codex, Antigravity, or a similar agent to install UFlow for you, tell it to just run the one-liner above:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Wasik-Yousha/UFlow/main/scripts/install.sh | bash
+```
+
+That's the whole job — the script checks for macOS 26+, downloads the latest release, verifies its checksum, installs to `/Applications`, and launches it. An agent should not fetch the `.dmg` and drag it into `/Applications` by hand — that path leaves a quarantine flag that only a human clicking "Open Anyway" in System Settings can clear; the script sidesteps it entirely.
+
+Two things happen after that no agent can do on your behalf, because they're OS security prompts, not app UI: **you'll be asked to grant Microphone, Input Monitoring, and Accessibility** the first time UFlow runs. An agent can tell you these are coming and why (see the table below); only you can click Allow.
+
+Once granted, UFlow runs as a background menu-bar app with no Dock icon, and **hold `Fn` to talk** is the default hotkey — nothing else to set up.
+
+If you'd rather use the download button: grab the `.dmg` from [Download UFlow 1.1](https://github.com/Wasik-Yousha/UFlow/releases/latest) , drag UFlow to Applications, try to open it, get refused, Click Done.
 
 ⚠️ Not "Move to Trash" — Apple styles the destructive button green and makes it the visually obvious one.
 
@@ -119,7 +135,7 @@ cd ~/Downloads
 shasum -a 256 -c <(curl -fsSL https://github.com/Wasik-Yousha/UFlow/releases/latest/download/SHA256SUMS)
 ```
 
-`UFlow-1.0.dmg: OK` means the file you have is byte-for-byte the one that was built here.
+`UFlow-1.1.dmg: OK` means the file you have is byte-for-byte the one that was built here.
 It confirms the download arrived intact — it is not a signature, and it is not a substitute
 for notarization. If it ever says `FAILED`, don't install it.
 

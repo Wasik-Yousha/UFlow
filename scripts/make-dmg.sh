@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds UFlow in Release and packages it as a shareable disk image.
 #
-#   ./scripts/make-dmg.sh            -> dist/UFlow-1.0.dmg
+#   ./scripts/make-dmg.sh            -> dist/UFlow-<version>.dmg
 #
 # The app is signed with whatever identity the project is configured for. If
 # that is a self-signed certificate, see "Opening it on someone else's Mac" in
@@ -58,7 +58,7 @@ UFlow
        Input Monitoring   to see the global hotkey from other apps
        Accessibility      to type the transcript where you were working
 
-4. Press Fn + Y anywhere to start dictating, and again to stop.
+4. Hold Fn anywhere to dictate, let go to stop.
    Change the hotkey in Settings (Cmd + comma).
 NOTE
 

@@ -484,7 +484,8 @@ final class AppSettings: ObservableObject {
 
     init() {
         modifierKeyCode = defaults.object(forKey: Key.modifier) as? Int ?? kVK_Function
-        let storedTrigger = defaults.object(forKey: Key.trigger) as? Int ?? kVK_ANSI_Y
+        // Default is Fn held alone — the fewest possible moving parts.
+        let storedTrigger = defaults.object(forKey: Key.trigger) as? Int ?? Self.noLetterSentinel
         triggerKeyCode = storedTrigger == Self.noLetterSentinel ? nil : storedTrigger
         hotkeyMode = (defaults.string(forKey: Key.mode).flatMap(HotkeyMode.init(rawValue:))) ?? .toggle
         backend = (defaults.string(forKey: Key.backend).flatMap(BackendPreference.init(rawValue:))) ?? .automatic

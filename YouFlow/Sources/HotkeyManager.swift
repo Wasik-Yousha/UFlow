@@ -4,10 +4,12 @@ import CoreGraphics
 
 /// Global push-to-talk trigger manager.
 ///
-/// Default trigger: hold **Fn/Globe + Y** together. This combination has no
-/// system binding, which sidesteps every Globe-alone system action (input
-/// source switching, emoji panel) while remaining fully global — it works no
-/// matter which application is frontmost.
+/// Default trigger: hold **Fn/Globe** alone — the simplest possible gesture,
+/// at the cost of racing macOS's own Globe-key action (Emoji & Symbols by
+/// default). Anyone bothered by that can switch to Control, Option, or
+/// Command in Settings, or pair the modifier with a letter — either sidesteps
+/// the system binding entirely, while the chord still works no matter which
+/// application is frontmost.
 ///
 /// Implementation notes:
 /// - A session-level `CGEventTap` observes `keyDown`, `keyUp`, and
@@ -34,8 +36,8 @@ final class HotkeyManager {
         /// it has no system binding of its own when paired with a letter.
         var modifierKeyCode: Int = kVK_Function
         /// The letter that completes the chord. `nil` means the modifier is
-        /// the whole trigger — e.g. holding Fn alone with no paired key.
-        var triggerKeyCode: Int? = kVK_ANSI_Y
+        /// the whole trigger — the default: holding Fn alone with no paired key.
+        var triggerKeyCode: Int? = nil
 
         /// The event flag the chosen modifier raises. Driven off the key code
         /// so the two can never disagree.
@@ -144,7 +146,7 @@ final class HotkeyManager {
 
         tap = port
         runLoopSource = source
-        Log.hotkey.info("Hotkey tap installed (Fn+Y)")
+        Log.hotkey.info("Hotkey tap installed (\(self.trigger.displayName, privacy: .public))")
         return true
     }
 
