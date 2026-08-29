@@ -422,7 +422,15 @@ final class AppState: ObservableObject, StatusInfoProvider {
             hud.hide()
 
             // The dictionary's guaranteed pass.
-            let (finalText, corrections) = CorrectionEngine.apply(dictionary.ruleset, to: rawText)
+            let (correctedText, corrections) = CorrectionEngine.apply(dictionary.ruleset, to: rawText)
+
+            // Strip control/escape characters (keeping newlines and tabs) so a
+            // stray one — from the engine or a dictionary replacement — can
+            // never do something clever to whatever the transcript lands in,
+            // a terminal emulator most notably.
+            let finalText = String(correctedText.unicodeScalars.filter {
+                $0 == "\n" || $0 == "\t" || !CharacterSet.controlCharacters.contains($0)
+            })
 
             guard !finalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 // Empty dictation: touch nothing, return to ready.
