@@ -31,10 +31,20 @@ struct SettingsView: View {
                         .foregroundStyle(Tok.C.accent)
                         .monospacedDigit()
                 }
+
+                Picker("Behavior", selection: Binding(
+                    get: { app.settings.hotkeyMode },
+                    set: { app.settings.hotkeyMode = $0 }
+                )) {
+                    ForEach(HotkeyMode.allCases, id: \.self) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
             } header: {
                 Text("Hotkey")
             } footer: {
-                Text("Tap once to start, tap again to stop. Works in any app; the text is typed where you were.")
+                Text(app.settings.hotkeyMode.detail + " Works in any app; the text is typed where you were.")
                     .foregroundStyle(.secondary)
             }
 

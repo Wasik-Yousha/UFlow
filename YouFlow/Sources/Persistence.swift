@@ -371,6 +371,28 @@ final class TranscriptStore: ObservableObject {
 /// about the palette itself — only which half of each pair resolves. Setting
 /// `NSApp.appearance` covers every window the app owns, the floating HUD
 /// included, so nothing has to be told about the change individually.
+/// How the hotkey chord behaves.
+enum HotkeyMode: String, CaseIterable, Codable, Sendable {
+    /// Tap once to start, talk freely, tap again to stop.
+    case toggle
+    /// Classic push-to-talk — hold the chord while speaking, release to stop.
+    case hold
+
+    var label: String {
+        switch self {
+        case .toggle: "Tap to toggle"
+        case .hold: "Hold to talk"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .toggle: "Tap once to start, tap again to stop."
+        case .hold: "Hold the chord while speaking, release to stop."
+        }
+    }
+}
+
 enum AppearancePreference: String, CaseIterable, Codable, Sendable {
     case system, light, dark
 
@@ -407,6 +429,7 @@ final class AppSettings: ObservableObject {
     private enum Key {
         static let modifier = "hotkey.modifierKeyCode"
         static let trigger = "hotkey.triggerKeyCode"
+        static let mode = "hotkey.mode"
         static let backend = "engine.backend"
         static let sound = "ui.soundEnabled"
         static let menuBar = "ui.menuBarItem"
@@ -418,6 +441,7 @@ final class AppSettings: ObservableObject {
 
     @Published var modifierKeyCode: Int { didSet { defaults.set(modifierKeyCode, forKey: Key.modifier) } }
     @Published var triggerKeyCode: Int { didSet { defaults.set(triggerKeyCode, forKey: Key.trigger) } }
+    @Published var hotkeyMode: HotkeyMode { didSet { defaults.set(hotkeyMode.rawValue, forKey: Key.mode) } }
     @Published var backend: BackendPreference { didSet { defaults.set(backend.rawValue, forKey: Key.backend) } }
     @Published var showMenuBarItem: Bool { didSet { defaults.set(showMenuBarItem, forKey: Key.menuBar) } }
 
@@ -448,6 +472,7 @@ final class AppSettings: ObservableObject {
     init() {
         modifierKeyCode = defaults.object(forKey: Key.modifier) as? Int ?? kVK_Function
         triggerKeyCode = defaults.object(forKey: Key.trigger) as? Int ?? kVK_ANSI_Y
+        hotkeyMode = (defaults.string(forKey: Key.mode).flatMap(HotkeyMode.init(rawValue:))) ?? .toggle
         backend = (defaults.string(forKey: Key.backend).flatMap(BackendPreference.init(rawValue:))) ?? .automatic
         soundEnabled = defaults.object(forKey: Key.sound) as? Bool ?? true
         showMenuBarItem = defaults.object(forKey: Key.menuBar) as? Bool ?? true

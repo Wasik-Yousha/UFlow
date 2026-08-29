@@ -69,14 +69,6 @@ final class AppState: ObservableObject, StatusInfoProvider {
 
     // MARK: - Session bookkeeping
 
-    /// How the chord behaves:
-    /// - `.toggle`: tap once to start, talk freely, tap again to stop.
-    /// - `.hold`: classic push-to-talk — hold while speaking, release to stop.
-    private enum TriggerMode {
-        case hold
-        case toggle
-    }
-
     /// Where a session was started from. It decides what happens to the text:
     /// a session begun by the hotkey types into whatever app you were in, while
     /// one begun from the window would otherwise type into UFlow itself.
@@ -84,8 +76,6 @@ final class AppState: ObservableObject, StatusInfoProvider {
         case hotkey
         case window
     }
-
-    private let triggerMode: TriggerMode = .toggle
 
     private var sessionTask: Task<Void, Never>?
     private var releaseWaiter: CheckedContinuation<Void, Never>?
@@ -132,6 +122,15 @@ final class AppState: ObservableObject, StatusInfoProvider {
                 self?.applyBackend(preference)
             }
             .store(in: &cancellables)
+
+        // The event tap can only be created once Input Monitoring is granted.
+        // Granting it after a failed bootstrap attempt doesn't retroactively
+        // fix that attempt, so retry every time permission state changes
+        // (e.g. after the user grants it in System Settings and comes back).
+        permissionManager.$state
+            .dropFirst()
+            .sink { [weak self] _ in self?.attemptHotkeyInstall() }
+            .store(in: &cancellables)
     }
 
     func attachStatusBar(_ controller: StatusBarController) {
@@ -165,21 +164,33 @@ final class AppState: ObservableObject, StatusInfoProvider {
             await prepareEngineIfPossible()
         }
 
+        attemptHotkeyInstall()
+        Log.app.info("Bootstrap finished in state \(String(describing: self.state), privacy: .public)")
+    }
+
+    /// (Re)tries installing the global event tap. Safe to call repeatedly:
+    /// a no-op once the tap already exists. Called at bootstrap and again
+    /// whenever permission state changes, since Input Monitoring granted
+    /// after a failed `install()` doesn't retroactively fix that attempt.
+    private func attemptHotkeyInstall() {
+        guard !hotkeyManager.isInstalled else { return }
+        switch state {
+        case .initializing, .unavailable: break
+        case .ready, .recording, .transcribing, .injecting, .error: return
+        }
+
         if hotkeyManager.install() {
-            if case .initializing = self.state {
-                if enginePrepared && permissionManager.state.allGranted {
-                    state = .ready
-                } else if !enginePrepared {
-                    state = .unavailable(engineDetailText)
-                } else {
-                    let missing = permissionManager.state.missingBlockingNames.joined(separator: ", ")
-                    state = .unavailable("Grant \(missing) in System Settings, then restart UFlow")
-                }
+            if enginePrepared && permissionManager.state.allGranted {
+                state = .ready
+            } else if !enginePrepared {
+                state = .unavailable(engineDetailText)
+            } else {
+                let missing = permissionManager.state.missingBlockingNames.joined(separator: ", ")
+                state = .unavailable("Grant \(missing) in System Settings, then restart UFlow")
             }
         } else {
             state = .unavailable("Input Monitoring permission required")
         }
-        Log.app.info("Bootstrap finished in state \(String(describing: self.state), privacy: .public)")
     }
 
     private func prepareEngineIfPossible() async {
@@ -237,7 +248,7 @@ final class AppState: ObservableObject, StatusInfoProvider {
 
     private func handleTriggerDown() {
         // Toggle mode: a second tap while recording stops the session.
-        if triggerMode == .toggle, sessionTask != nil {
+        if settings.hotkeyMode == .toggle, sessionTask != nil {
             if state == .recording {
                 Log.hotkey.info("Toggle: second tap — stopping session")
                 SoundKit.play(.stopDown)
@@ -301,7 +312,7 @@ final class AppState: ObservableObject, StatusInfoProvider {
 
         // In toggle mode the UP edge merely completes the starting tap; the
         // session keeps recording until the next tap arrives.
-        guard triggerMode == .hold else { return }
+        guard settings.hotkeyMode == .hold else { return }
 
         if let started = pressStartedAt,
            ContinuousClock.now - started < Self.minimumPressDuration {
