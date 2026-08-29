@@ -97,7 +97,7 @@ UFlow will ask for three permissions on first launch. All are required:
   Input Monitoring   to see the global hotkey while another app is focused
   Accessibility      to type the transcript into the app you were using
 
-Press Fn + Y anywhere to dictate. Change the hotkey in Settings (Cmd+,).
+Hold Fn anywhere to dictate. Change the hotkey in Settings (Cmd+,).
 
 EOF
 
