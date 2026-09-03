@@ -38,7 +38,15 @@ final class AppState: ObservableObject, StatusInfoProvider {
     let settings = AppSettings()
 
     private let hotkeyManager = HotkeyManager()
-    private let engine = SpeechEngine()
+    private let appleEngine = SpeechEngine()
+    private let parakeetEngine = ParakeetEngine()
+
+    /// The backend the current preference selects. Both conform to
+    /// `TranscriptionEngine`, so the session runner below does not care which
+    /// one it is talking to.
+    private var engine: any TranscriptionEngine {
+        settings.backend.usesParakeet ? parakeetEngine : appleEngine
+    }
     private let hud = HUDPanelController()
     private let injector = ClipboardInjector()
     private(set) weak var statusBarController: StatusBarController?
@@ -58,6 +66,15 @@ final class AppState: ObservableObject, StatusInfoProvider {
 
     /// Name of the backend that produced the last transcript, for the history.
     @Published private(set) var engineName = "Apple (streaming)"
+
+    /// 0…1 while a model is downloading, nil otherwise. Parakeet's weights are
+    /// ~600 MB, so this is the difference between a progress bar and a hang.
+    @Published private(set) var modelDownloadProgress: Double?
+
+    /// Whether Parakeet's weights are already on disk. Mirrored into a
+    /// published property because the on-disk check is a plain filesystem
+    /// look and would never tell SwiftUI it had changed.
+    @Published private(set) var parakeetModelIsDownloaded = ParakeetEngine.modelsAreDownloaded
 
     var isRecording: Bool { state == .recording }
     var isBusy: Bool { state == .transcribing || state == .injecting }
@@ -140,7 +157,7 @@ final class AppState: ObservableObject, StatusInfoProvider {
         Log.app.info("Bootstrap started")
 
         SoundKit.warmUp()
-        await engine.setPreference(settings.backend)
+        await appleEngine.setPreference(settings.backend)
 
         permissionManager.refresh()
         _ = await permissionManager.requestMicrophoneIfNeeded()
@@ -200,19 +217,36 @@ final class AppState: ObservableObject, StatusInfoProvider {
         }
     }
 
+    /// Fetch Parakeet's weights on demand, so Settings can offer the download
+    /// as a deliberate act instead of having 600 MB start silently the first
+    /// time someone presses the hotkey.
+    func downloadParakeetModel() {
+        guard settings.backend.usesParakeet, modelDownloadProgress == nil else { return }
+        Task { await prepareEngineIfPossible() }
+    }
+
     private func prepareEngineIfPossible() async {
         do {
+            let usingParakeet = settings.backend.usesParakeet
             try await engine.prepare(progressHandler: { [weak self] fraction in
                 Task { @MainActor in
-                    self?.engineDetailText = "Downloading speech model… \(Int(fraction * 100))%"
+                    let percent = Int(fraction * 100)
+                    self?.engineDetailText = usingParakeet
+                        ? "Downloading Parakeet model… \(percent)%"
+                        : "Downloading speech model… \(percent)%"
+                    self?.modelDownloadProgress = fraction < 1 ? fraction : nil
                 }
             })
             enginePrepared = true
+            modelDownloadProgress = nil
+            parakeetModelIsDownloaded = ParakeetEngine.modelsAreDownloaded
             engineDetailText = "On-device English transcription"
             engineName = await engine.activeBackendName
             Log.speech.info("Engine prepared")
         } catch {
             enginePrepared = false
+            modelDownloadProgress = nil
+            parakeetModelIsDownloaded = ParakeetEngine.modelsAreDownloaded
             engineDetailText = "Engine unavailable"
             if case .initializing = state {
                 state = .unavailable(error.localizedDescription)
@@ -227,7 +261,7 @@ final class AppState: ObservableObject, StatusInfoProvider {
         enginePrepared = false
         engineDetailText = "Switching model…"
         Task {
-            await engine.setPreference(preference)
+            await appleEngine.setPreference(preference)
             await prepareEngineIfPossible()
             if enginePrepared, case .unavailable = state { state = .ready }
         }
