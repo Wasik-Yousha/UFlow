@@ -122,6 +122,13 @@ final class AppState: ObservableObject, StatusInfoProvider {
                 self?.applyBackend(preference)
             }
             .store(in: &cancellables)
+
+        settings.$language
+            .dropFirst()
+            .sink { [weak self] language in
+                self?.applyLanguage(language)
+            }
+            .store(in: &cancellables)
     }
 
     func attachStatusBar(_ controller: StatusBarController) {
@@ -141,6 +148,7 @@ final class AppState: ObservableObject, StatusInfoProvider {
 
         SoundKit.warmUp()
         await engine.setPreference(settings.backend)
+        await engine.setLanguage(settings.language)
 
         permissionManager.refresh()
         _ = await permissionManager.requestMicrophoneIfNeeded()
@@ -208,7 +216,7 @@ final class AppState: ObservableObject, StatusInfoProvider {
                 }
             })
             enginePrepared = true
-            engineDetailText = "On-device English transcription"
+            engineDetailText = "On-device \(settings.language.label) transcription"
             engineName = await engine.activeBackendName
             Log.speech.info("Engine prepared")
         } catch {
@@ -228,6 +236,17 @@ final class AppState: ObservableObject, StatusInfoProvider {
         engineDetailText = "Switching model…"
         Task {
             await engine.setPreference(preference)
+            await prepareEngineIfPossible()
+            if enginePrepared, case .unavailable = state { state = .ready }
+        }
+    }
+
+    /// Applies a language change from Settings. Same rebuild as a backend change.
+    private func applyLanguage(_ language: SpeechLanguage) {
+        enginePrepared = false
+        engineDetailText = "Switching language…"
+        Task {
+            await engine.setLanguage(language)
             await prepareEngineIfPossible()
             if enginePrepared, case .unavailable = state { state = .ready }
         }
@@ -421,8 +440,10 @@ final class AppState: ObservableObject, StatusInfoProvider {
             let rawText = await engine.stopRecordingAndCollect()
             hud.hide()
 
-            // The dictionary's guaranteed pass.
-            let (correctedText, corrections) = CorrectionEngine.apply(dictionary.ruleset, to: rawText)
+            // Fillers ("um", "uh", "ah") go first, so the dictionary sees the
+            // words the user meant; then the dictionary's guaranteed pass.
+            let (correctedText, corrections) = CorrectionEngine.apply(
+                dictionary.ruleset, to: FillerFilter.apply(to: rawText))
 
             // Strip control/escape characters (keeping newlines and tabs) so a
             // stray one — from the engine or a dictionary replacement — can

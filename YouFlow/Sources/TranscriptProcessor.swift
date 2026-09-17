@@ -193,9 +193,97 @@ enum CorrectionEngine {
         // "->" is accepted as well as "=>", because people type it.
         assert(DictionaryStore.parse("vercell -> Vercel").first?.replacement == "Vercel")
 
+        // Filler removal: fillers go, punctuation and capitals are repaired.
+        for (input, expected) in [
+            ("So, um, I think", "So I think"),
+            ("The build is, uh, ready", "The build is ready"),
+            ("Um, hello", "Hello"),
+            ("I think, um.", "I think."),
+            ("Uhhh, ummm, yes", "Yes"),
+            ("Yes. Hmm. Okay", "Yes. Okay"),
+            ("Wait... uh, what?", "Wait... what?"),
+            ("Ah, I see", "I see"),
+            ("Aa, I mean it, aah", "I mean it"),
+            ("Um.", ""),
+        ] {
+            let got = FillerFilter.apply(to: input)
+            assert(got == expected, "filler: \(input) -> \(got)")
+        }
+        // Real words that look like fillers survive untouched.
+        for safe in ["uh-huh that's right", "The ER doctor, err on it", "5 mm and AA batteries",
+                     "Ahmed said aha", "an umbrella, a hum", "Hello there. Okay"] {
+            assert(FillerFilter.apply(to: safe) == safe, "filler corrupted: \(safe)")
+        }
+
         Log.app.info("CorrectionEngine self-check passed")
         if CommandLine.arguments.contains("--self-check") {
             print("CorrectionEngine self-check: PASS")
         }
+    }
+}
+
+// MARK: - Filler words
+
+/// Strips hesitation sounds ("um", "uh", "ah", "aa", "hmm") before the
+/// dictionary pass. Written as patterns rather than a word list, so stretched
+/// forms ("ummm", "uhhh", "aaah") need no entries of their own.
+///
+/// Approach follows VoiceInk / Handy / FluidVoice, minus their known misses:
+/// stray commas, lost capitals, "uh-huh" becoming "-huh", and "mm" eating
+/// millimetres. Deliberately left alone because they are real words:
+/// "er"/"err", "mm", "uh-huh", capital "AA" (batteries), and "ah" inside a
+/// word ("Ahmed", "aha").
+enum FillerFilter {
+    private static let filler = try! NSRegularExpression(
+        // The comma on either side goes too: the engine writes fillers as
+        // ", uh," so "the build is, uh, ready" must not keep one of them.
+        pattern: #"(?:[,;]\s*)?(?<![\w'-])(?:u+h+|u+h*m+|e+r+m+|h+m+|m{3,}|a+h+|(?-i:[Aa]a+h*))(?![\w'-])[,;]?\s*"#,
+        options: [.caseInsensitive]
+    )
+
+    /// Punctuation orphaned by a removal, repaired in this order.
+    private static let tidy: [(NSRegularExpression, String)] = [
+        (#"([.!?])\s+[.!?](?=\s|$)"#, "$1"), // "Yes. . Okay" -> "Yes. Okay"
+        (#"\s+([,.;:!?])"#, "$1"),           // "think ."     -> "think."
+        (#"[,;]+([.!?])"#, "$1"),            // "think,."     -> "think."
+        (#"^[\s,;.!?]+"#, ""),               // ". Hello"     -> "Hello"
+        (#"[\s,;]+$"#, ""),                  // "mean it, "   -> "mean it"
+        (#" {2,}"#, " "),
+    ].map { (try! NSRegularExpression(pattern: $0.0), $0.1) }
+
+    static func apply(to text: String) -> String {
+        let ns = text as NSString
+        let matches = filler.matches(in: text, range: NSRange(location: 0, length: ns.length))
+        // No filler, no rewrite: tidying is never applied to clean text.
+        guard !matches.isEmpty else { return text }
+
+        var out = ""
+        var cursor = 0
+        var capitalizeNext = false
+        for match in matches {
+            append(ns.substring(with: NSRange(location: cursor, length: match.range.location - cursor)),
+                   to: &out, capitalizing: &capitalizeNext)
+            // A filler that opened a sentence hands its capital to the next
+            // word. An ellipsis ("Wait... um, what?") does not end a sentence.
+            let before = out.trimmingCharacters(in: .whitespaces)
+            if before.isEmpty || (".!?".contains(before.last!) && !before.hasSuffix("..")) {
+                capitalizeNext = true
+            }
+            // A space stands in for the removed filler; the tidy pass collapses doubles.
+            out += " "
+            cursor = NSMaxRange(match.range)
+        }
+        append(ns.substring(from: cursor), to: &out, capitalizing: &capitalizeNext)
+
+        return tidy.reduce(out) { text, rule in
+            rule.0.stringByReplacingMatches(
+                in: text, range: NSRange(location: 0, length: (text as NSString).length), withTemplate: rule.1)
+        }.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func append(_ segment: String, to out: inout String, capitalizing flag: inout Bool) {
+        guard flag, let i = segment.firstIndex(where: \.isLetter) else { out += segment; return }
+        out += String(segment[..<i]) + segment[i].uppercased() + String(segment[segment.index(after: i)...])
+        flag = false
     }
 }

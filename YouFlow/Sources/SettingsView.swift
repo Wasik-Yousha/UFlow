@@ -51,7 +51,7 @@ struct SettingsView: View {
                     if app.settings.triggerKeyCode == nil {
                         Text("A modifier alone always holds — as a toggle it would fire on every incidental tap.")
                         if app.settings.modifierKeyCode == kVK_Function {
-                            Text("Fn alone also triggers macOS's own Globe-key action (Emoji & Symbols, by default). Pick Control, Option, or Command above to avoid that, or turn it off in System Settings → Keyboard → Press 🌐 key to → No Action.")
+                            Text("A quick tap of Fn stays macOS's own (the emoji picker, by default); only a hold starts dictation.")
                         }
                     }
                 }
@@ -59,6 +59,19 @@ struct SettingsView: View {
             }
 
             Section {
+                Picker("Language", selection: Binding(
+                    get: { app.settings.language },
+                    set: { app.settings.language = $0 }
+                )) {
+                    ForEach(SpeechLanguage.allCases, id: \.self) { language in
+                        Text(language.label).tag(language)
+                    }
+                }
+                .pickerStyle(.segmented)
+                Text(app.settings.language.detail)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
                 Picker("Model", selection: Binding(
                     get: { app.settings.backend },
                     set: { app.settings.backend = $0 }

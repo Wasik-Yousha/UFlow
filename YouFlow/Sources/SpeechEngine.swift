@@ -3,6 +3,31 @@ import CoreMedia
 import Foundation
 import Speech
 
+/// One-shot rendezvous used by the speech shutdown watchdog. This is an actor
+/// rather than a structured task group because a task group cannot leave its
+/// scope until *all* children finish. If one child is waiting on a wedged
+/// SpeechAnalyzer operation, that rule turns the supposed timeout into another
+/// indefinite wait.
+private actor CompletionRace {
+    private var result: Bool?
+    private var waiters: [CheckedContinuation<Bool, Never>] = []
+
+    func resolve(with value: Bool) {
+        guard result == nil else { return }
+        result = value
+        let pending = waiters
+        waiters.removeAll()
+        pending.forEach { $0.resume(returning: value) }
+    }
+
+    func value() async -> Bool {
+        if let result { return result }
+        return await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+}
+
 // MARK: - Result text extraction
 
 /// Unifies the result types of SpeechTranscriber and DictationTranscriber so a
@@ -82,7 +107,7 @@ enum SpeechEngineError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .transcriberUnavailable: return "On-device speech transcription is unavailable."
-        case .localeUnsupported: return "English (en-US) transcription is not supported on this device."
+        case .localeUnsupported: return "This language's transcription is not supported on this device."
         case .assetsUnsupported: return "Required speech assets cannot be installed on this device."
         case .notPrepared: return "Speech engine is not prepared yet."
         case .sessionAlreadyActive: return "A dictation session is already running."
@@ -121,12 +146,50 @@ enum BackendPreference: String, CaseIterable, Codable, Sendable {
     }
 }
 
+// MARK: - Language
+
+/// What the user speaks. Apple ships no Bengali model, so Banglish rides the
+/// Indian-English model (South Asian accent, code-switching) plus a short bias
+/// list of common romanized Bangla words.
+enum SpeechLanguage: String, CaseIterable, Codable, Sendable {
+    case english
+    case mixed
+    case banglish
+
+    var label: String {
+        switch self {
+        case .english: "English"
+        case .mixed: "English + Banglish"
+        case .banglish: "Banglish"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .english: "US English model. Best when you only speak English."
+        case .mixed: "Indian-English model. Handles a Bangladeshi accent and Bangla words mixed into English."
+        case .banglish: "Indian-English model, nudged toward romanized Bangla words. Add your own to the dictionary."
+        }
+    }
+
+    var localeIdentifier: String { self == .english ? "en-US" : "en-IN" }
+
+    /// ponytail: a bias nudge, not a Bengali model — real Bangla needs Whisper.
+    /// Kept short: long contextual lists make these models invent text.
+    var biasTerms: [String] {
+        guard self == .banglish else { return [] }
+        return ["ami", "tumi", "apni", "ki", "keno", "kothay", "hobe", "korbo",
+                "korchi", "bhalo", "achi", "acho", "na", "hae", "ekhon", "kalke",
+                "bhai", "accha", "thik ache", "dhonnobad"]
+    }
+}
+
 // MARK: - Engine
 
 /// Owns Apple's modern on-device speech stack and the microphone capture graph.
 ///
 /// Lifecycle design (latency-critical AND crash-safe):
-/// - Launch time: resolve the en-US locale once, install required speech
+/// - Launch time: resolve the chosen language's locale once, install required speech
 ///   assets, and PREWARM model loading with a THROWAWAY module/analyzer pair
 ///   that is explicitly released afterwards.
 /// - Per press-to-talk session: construct a FRESH transcription module plus a
@@ -158,6 +221,7 @@ actor SpeechEngine {
         let consumerTask: Task<Void, Never>
         let accumulator: TranscriptAccumulator
         let startedAt: ContinuousClock.Instant
+        let yielded: YieldCounter
     }
 
     // Preparation results (launch time).
@@ -175,6 +239,9 @@ actor SpeechEngine {
 
     /// Which transcription backend the user asked for.
     private var preference: BackendPreference = .automatic
+
+    /// Which language model and bias the user asked for.
+    private var language: SpeechLanguage = .english
 
     var isPrepared: Bool { resolvedLocale != nil }
     var isSessionActive: Bool { activeSession != nil }
@@ -197,6 +264,15 @@ actor SpeechEngine {
         Log.speech.info("Backend preference set to \(newValue.rawValue, privacy: .public)")
     }
 
+    /// Chooses the language. Same rebuild rule as the backend.
+    func setLanguage(_ newValue: SpeechLanguage) {
+        guard newValue != language else { return }
+        language = newValue
+        resolvedLocale = nil
+        preparedFormat = nil
+        Log.speech.info("Language set to \(newValue.rawValue, privacy: .public)")
+    }
+
     /// The backend actually in use, for display.
     var activeBackendName: String {
         guard resolvedLocale != nil else { return "Not ready" }
@@ -212,7 +288,7 @@ actor SpeechEngine {
     func prepare(progressHandler: (@Sendable (Double) -> Void)? = nil) async throws {
         guard resolvedLocale == nil else { return }
 
-        let requestedLocale = Locale(identifier: "en-US")
+        let requestedLocale = Locale(identifier: language.localeIdentifier)
         let useFallback: Bool
         let locale: Locale
 
@@ -340,9 +416,10 @@ actor SpeechEngine {
         )
         // Contextual biasing. This is the only thing the dictionary changes
         // about recognition itself; everything else it does happens afterwards.
-        if !biasTerms.isEmpty {
+        let allBiasTerms = biasTerms + language.biasTerms
+        if !allBiasTerms.isEmpty {
             let context = AnalysisContext()
-            context.contextualStrings[.general] = biasTerms
+            context.contextualStrings[.general] = allBiasTerms
             do {
                 try await analyzer.setContext(context)
             } catch {
@@ -359,11 +436,12 @@ actor SpeechEngine {
             throw SpeechEngineError.analysisFailed(error.localizedDescription)
         }
 
-        // Lightweight realtime tap: copy/convert the buffer and yield it onward.
-        let recycled = RecycledOutputBuffer(format: targetFormat)
+        // Lightweight realtime tap: convert the buffer and yield it onward.
+        let counter = YieldCounter()
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: hardwareFormat) { buffer, _ in
             onLevel?(Self.normalizedLevel(of: buffer))
-            guard let output = recycled.output(for: buffer, converting: converter) else { return }
+            guard let output = Self.converted(buffer, with: converter, to: targetFormat) else { return }
+            counter.count += 1
             continuation.yield(AnalyzerInput(buffer: output))
         }
 
@@ -383,7 +461,8 @@ actor SpeechEngine {
             inputContinuation: continuation,
             consumerTask: consumerTask,
             accumulator: accumulator,
-            startedAt: ContinuousClock.now
+            startedAt: ContinuousClock.now,
+            yielded: counter
         )
         Log.speech.info("Recording started")
     }
@@ -407,6 +486,18 @@ actor SpeechEngine {
 
         // 2) Tell the stream no more audio is coming.
         session.inputContinuation.finish()
+        Log.speech.info("Audio buffers delivered to analyzer: \(session.yielded.count, privacy: .public)")
+
+        // A release that lands before the microphone's first buffer (a quick
+        // tap, or a slow engine start on an older Mac) leaves the analyzer with
+        // an input stream that closed empty. In that state it never ends its
+        // results sequence, so finalizing would only park the HUD on
+        // TRANSCRIBING until the drain watchdog fires. There is nothing to
+        // transcribe anyway.
+        guard session.yielded.count > 0 else {
+            await cancelSession()
+            return ""
+        }
 
         // 3) Ask the analyzer to finalize everything received so far. Bounded
         //    by a timeout so a wedged pipeline can never hang the app.
@@ -417,17 +508,37 @@ actor SpeechEngine {
         let finalizedInTime = await Self.awaitCompletion(of: finalizeTask, within: finalizeBudget)
         if !finalizedInTime {
             Log.speech.warning("Finalization timed out — cancelling analysis")
-            await session.analyzer.cancelAndFinishNow()
             finalizeTask.cancel()
+
+            // Apple's emergency cancellation is normally immediate, but keep
+            // it behind its own watchdog too. A framework operation that is
+            // already wedged must not be able to strand the HUD a second time
+            // through the recovery path.
+            let cancellationTask = Task { await session.analyzer.cancelAndFinishNow() }
+            let cancelledInTime = await Self.awaitCompletion(of: cancellationTask, within: .seconds(2))
+            if !cancelledInTime {
+                Log.speech.error("Speech cancellation timed out — abandoning analyzer")
+                cancellationTask.cancel()
+            }
         } else {
             Log.speech.info("Speech finalization completed")
         }
 
-        // 4) Drain remaining results until the consumer ends naturally.
-        let drainedInTime = await Self.awaitCompletion(of: session.consumerTask, within: drainBudget)
-        if !drainedInTime {
+        // 4) Drain remaining results only after a successful finalization. If
+        // finalization itself timed out, cancellation cannot yield a reliable
+        // final result and another full drain deadline would just keep the dead
+        // HUD visible longer.
+        if finalizedInTime {
+            let drainedInTime = await Self.awaitCompletion(of: session.consumerTask, within: drainBudget)
+            if !drainedInTime {
+                session.consumerTask.cancel()
+                // Do not immediately await the cancelled task here: an
+                // AsyncSequence supplied by the framework may fail to observe
+                // cancellation, which would undo the timeout above.
+                Log.speech.warning("Results drain timed out — abandoning consumer")
+            }
+        } else {
             session.consumerTask.cancel()
-            _ = await session.consumerTask.result
         }
 
         let text = session.accumulator.finalText()
@@ -443,9 +554,19 @@ actor SpeechEngine {
         session.audioEngine.inputNode.removeTap(onBus: 0)
         session.audioEngine.stop()
         session.inputContinuation.finish()
-        await session.analyzer.cancelAndFinishNow()
+
+        let cancellationTask = Task { await session.analyzer.cancelAndFinishNow() }
+        let cancelledInTime = await Self.awaitCompletion(of: cancellationTask, within: .seconds(2))
+        if !cancelledInTime {
+            Log.speech.error("Speech cancellation timed out — abandoning analyzer")
+            cancellationTask.cancel()
+        }
+
         session.consumerTask.cancel()
-        _ = await session.consumerTask.result
+        let consumerStopped = await Self.awaitCompletion(of: session.consumerTask, within: .seconds(1))
+        if !consumerStopped {
+            Log.speech.warning("Cancelled results consumer did not stop in time")
+        }
         activeSession = nil
         Log.speech.info("Session cancelled")
     }
@@ -494,46 +615,60 @@ actor SpeechEngine {
         of task: Task<Void, F>,
         within duration: Duration
     ) async -> Bool {
-        await withTaskGroup(of: Bool.self) { group in
-            group.addTask { _ = await task.result; return true }
-            group.addTask {
-                try? await Task.sleep(for: duration)
-                return false
-            }
-            let first = await group.next() ?? false
-            group.cancelAll()
-            return first
+        let race = CompletionRace()
+
+        // These are deliberately unstructured observers. A structured task
+        // group waits for every child on scope exit, including a child blocked
+        // on `task.result`, so its timeout branch can never actually return
+        // while the speech framework is wedged.
+        let completionObserver = Task {
+            _ = await task.result
+            await race.resolve(with: true)
         }
+        let timeoutObserver = Task {
+            do {
+                try await Task.sleep(for: duration)
+            } catch {
+                return
+            }
+            await race.resolve(with: false)
+        }
+
+        let completed = await race.value()
+        completionObserver.cancel()
+        timeoutObserver.cancel()
+        return completed
     }
 }
 
-// MARK: - Buffer recycling
+// MARK: - Audio tap helpers
 
-/// Reuses one growable PCM output buffer inside the realtime audio tap instead
-/// of allocating per callback. Confined to the render thread after creation.
-final class RecycledOutputBuffer: @unchecked Sendable {
-    private let format: AVAudioFormat
-    private var buffer: AVAudioPCMBuffer?
+/// Buffers yielded into the analyzer this session. Written only from the
+/// realtime tap (one thread) and read after the tap is removed.
+final class YieldCounter: @unchecked Sendable {
+    var count = 0
+}
 
-    init(format: AVAudioFormat) {
-        self.format = format
-    }
-
-    func output(for input: AVAudioPCMBuffer, converting converter: AVAudioConverter?) -> AVAudioPCMBuffer? {
+extension SpeechEngine {
+    /// Converts one mic buffer into the analyzer's format.
+    ///
+    /// A FRESH output buffer per callback is mandatory, not wasteful: the
+    /// buffer is handed to `AnalyzerInput` and queued in an unbounded stream
+    /// the analyzer drains on its own schedule. Reusing one buffer aliases
+    /// every queued input onto memory the audio thread immediately overwrites,
+    /// so the analyzer reads whatever the microphone captured last rather than
+    /// the recording — which is silence-shaped, and yields no transcript.
+    static func converted(
+        _ input: AVAudioPCMBuffer,
+        with converter: AVAudioConverter?,
+        to format: AVAudioFormat
+    ) -> AVAudioPCMBuffer? {
         guard let converter else { return input }
 
         let ratio = format.sampleRate / input.format.sampleRate
-        let neededCapacity = AVAudioFrameCount(Double(max(input.frameLength, 1)) * ratio) + 1024
+        let capacity = AVAudioFrameCount(Double(max(input.frameLength, 1)) * ratio) + 1024
+        guard let output = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else { return nil }
 
-        if let existing = buffer, existing.frameCapacity >= neededCapacity {
-            existing.frameLength = 0
-            buffer = existing
-        } else {
-            guard let fresh = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: neededCapacity) else { return nil }
-            buffer = fresh
-        }
-
-        guard let output = buffer else { return nil }
         var conversionError: NSError?
         // Canonical AVAudioConverter pattern: serve the pending input exactly
         // once per convert() call. If the converter asks again (it needs more

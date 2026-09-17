@@ -4,12 +4,10 @@ import CoreGraphics
 
 /// Global push-to-talk trigger manager.
 ///
-/// Default trigger: hold **Fn/Globe** alone — the simplest possible gesture,
-/// at the cost of racing macOS's own Globe-key action (Emoji & Symbols by
-/// default). Anyone bothered by that can switch to Control, Option, or
-/// Command in Settings, or pair the modifier with a letter — either sidesteps
-/// the system binding entirely, while the chord still works no matter which
-/// application is frontmost.
+/// Default trigger: hold **Fn/Globe** alone — the simplest possible gesture.
+/// A modifier alone only fires after `holdDelay`, so a quick Fn tap is left
+/// to macOS's own Globe-key action (Emoji & Symbols by default) and only a
+/// deliberate hold dictates. Pairing the modifier with a letter fires at once.
 ///
 /// Implementation notes:
 /// - A session-level `CGEventTap` observes `keyDown`, `keyUp`, and
@@ -106,6 +104,13 @@ final class HotkeyManager {
     private var isTriggerKeyDown = false
     private var isActive = false
 
+    /// How long a modifier alone must be held before dictation starts. Shorter
+    /// than this is a tap and belongs to the system (Fn → emoji picker).
+    /// ponytail: fixed delay — the calibration knob if taps start dictating
+    /// (raise it) or holds feel sluggish (lower it).
+    static let holdDelay: TimeInterval = 0.3
+    private var holdTimer: Timer?
+
     /// Called on the main thread when the chord completes (start dictation).
     var onTriggerDown: (() -> Void)?
     /// Called on the main thread when the chord breaks (stop dictation).
@@ -159,9 +164,7 @@ final class HotkeyManager {
         }
         tap = nil
         runLoopSource = nil
-        isModifierDown = false
-        isTriggerKeyDown = false
-        isActive = false
+        resetChordState()
     }
 
     /// Re-enables a tap the system disabled (timeout/user-input backpressure).
@@ -222,6 +225,9 @@ final class HotkeyManager {
             return false
 
         case .keyDown:
+            // Fn+Delete, Fn+arrows…: the modifier is doing its normal job, so
+            // a pending hold is not a dictation.
+            if trigger.triggerKeyCode == nil { cancelHold() }
             guard let triggerKeyCode = trigger.triggerKeyCode, keyCode == triggerKeyCode else { return false }
             // Only treat the letter as part of the chord when the modifier is
             // in play. Typing that letter normally passes through untouched.
@@ -246,7 +252,34 @@ final class HotkeyManager {
 
     /// Recomputes chord state and fires edge callbacks exactly once per transition.
     private func evaluate() {
-        let nowActive = trigger.triggerKeyCode == nil ? isModifierDown : (isModifierDown && isTriggerKeyDown)
+        let chordDown = trigger.triggerKeyCode == nil ? isModifierDown : (isModifierDown && isTriggerKeyDown)
+
+        // A modifier alone arms a timer instead of firing: released before it
+        // elapses, the press was a tap and nothing fires at all.
+        if trigger.triggerKeyCode == nil, chordDown, !isActive {
+            guard holdTimer == nil else { return }
+            let timer = Timer(timeInterval: Self.holdDelay, repeats: false) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.holdTimer = nil
+                    if self.isModifierDown { self.setActive(true) }
+                }
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            holdTimer = timer
+            return
+        }
+
+        cancelHold()
+        setActive(chordDown)
+    }
+
+    private func cancelHold() {
+        holdTimer?.invalidate()
+        holdTimer = nil
+    }
+
+    private func setActive(_ nowActive: Bool) {
         guard nowActive != isActive else { return }
         isActive = nowActive
 
@@ -262,8 +295,10 @@ final class HotkeyManager {
     /// Forces the chord open in case a keyUp was lost (e.g. focus change mid-hold).
     /// Called defensively when a dictation session ends.
     func resetChordState() {
+        cancelHold()
         isModifierDown = false
         isTriggerKeyDown = false
         isActive = false
     }
 }
+

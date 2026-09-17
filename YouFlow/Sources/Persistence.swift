@@ -431,6 +431,7 @@ final class AppSettings: ObservableObject {
         static let trigger = "hotkey.triggerKeyCode"
         static let mode = "hotkey.mode"
         static let backend = "engine.backend"
+        static let language = "engine.language"
         static let sound = "ui.soundEnabled"
         static let menuBar = "ui.menuBarItem"
         static let appearance = "ui.appearance"
@@ -456,6 +457,7 @@ final class AppSettings: ObservableObject {
     /// key to disambiguate an intentional press.
     var effectiveHotkeyMode: HotkeyMode { triggerKeyCode == nil ? .hold : hotkeyMode }
     @Published var backend: BackendPreference { didSet { defaults.set(backend.rawValue, forKey: Key.backend) } }
+    @Published var language: SpeechLanguage { didSet { defaults.set(language.rawValue, forKey: Key.language) } }
     @Published var showMenuBarItem: Bool { didSet { defaults.set(showMenuBarItem, forKey: Key.menuBar) } }
 
     @Published var appearance: AppearancePreference {
@@ -489,6 +491,7 @@ final class AppSettings: ObservableObject {
         triggerKeyCode = storedTrigger == Self.noLetterSentinel ? nil : storedTrigger
         hotkeyMode = (defaults.string(forKey: Key.mode).flatMap(HotkeyMode.init(rawValue:))) ?? .toggle
         backend = (defaults.string(forKey: Key.backend).flatMap(BackendPreference.init(rawValue:))) ?? .automatic
+        language = (defaults.string(forKey: Key.language).flatMap(SpeechLanguage.init(rawValue:))) ?? .english
         soundEnabled = defaults.object(forKey: Key.sound) as? Bool ?? true
         showMenuBarItem = defaults.object(forKey: Key.menuBar) as? Bool ?? true
         launchAtLogin = defaults.object(forKey: Key.launchAtLogin) as? Bool ?? true

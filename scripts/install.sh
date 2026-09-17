@@ -2,6 +2,9 @@
 #
 # UFlow installer.
 #
+# Do NOT copy this file into Terminal — zsh chokes on the first line
+# ("event not found"). Paste only this one line:
+#
 #   curl -fsSL https://raw.githubusercontent.com/Wasik-Yousha/UFlow/main/scripts/install.sh | bash
 #
 # Downloads the latest release, installs to /Applications, and launches it.
@@ -46,9 +49,13 @@ if [ $# -ge 1 ]; then
     say "Using local image $DMG"
 else
     say "Looking up the latest UFlow release"
-    url="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" \
-           | grep '"browser_download_url"' | grep '\.dmg"' | head -1 | cut -d'"' -f4 || true)"
-    [ -n "$url" ] || die "No .dmg found in the latest release of $REPO."
+    # Follow the releases/latest redirect to its tag rather than asking
+    # api.github.com: the API allows 60 anonymous calls an hour per IP, which
+    # a shared office or campus network exhausts, failing the install.
+    tag="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest" || true)"
+    tag="${tag##*/}"
+    case "$tag" in v[0-9]*) ;; *) die "Could not find the latest release of $REPO. Check your connection and try again." ;; esac
+    url="https://github.com/$REPO/releases/download/$tag/UFlow-${tag#v}.dmg"
 
     DMG="$(mktemp -t uflow).dmg"
     CLEANUP_DMG=1
@@ -73,6 +80,11 @@ fi
 if pgrep -qf "$APP/Contents/MacOS/UFlow" 2>/dev/null; then
     say "Quitting the running copy"
     osascript -e 'tell application "UFlow" to quit' 2>/dev/null || true
+    # The polite quit needs an Automation grant that may be refused or never
+    # answered. Left running, the old process survives the copy and `open`
+    # below just refocuses it — the install looks like it did nothing.
+    for _ in 1 2 3 4 5; do pgrep -qf "$APP/Contents/MacOS/UFlow" || break; sleep 1; done
+    pkill -f "$APP/Contents/MacOS/UFlow" 2>/dev/null || true
     sleep 1
 fi
 
