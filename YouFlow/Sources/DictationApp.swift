@@ -72,6 +72,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         CorrectionEngine.selfCheck()
         if CommandLine.arguments.contains("--self-check") { NSApp.terminate(nil); return }
         if CommandLine.arguments.contains("--dump-menu") { MenuDump.schedule(); return }
+        if CommandLine.arguments.contains("--dump-status-menu") { MenuDump.statusMenu(); return }
+        if let flag = CommandLine.arguments.firstIndex(of: "--snapshot-hud"), flag + 1 < CommandLine.arguments.count {
+            HUDPanelController.snapshot(to: CommandLine.arguments[flag + 1])
+            return
+        }
+        if CommandLine.arguments.contains("--romanize") {
+            // stdin lines → BanglaRomanizer, for offline evaluation.
+            while let line = readLine() { print(BanglaRomanizer.apply(to: line)) }
+            NSApp.terminate(nil)
+            return
+        }
+        if let flag = CommandLine.arguments.firstIndex(of: "--transcribe") {
+            FileTranscription.run(Array(CommandLine.arguments[(flag + 1)...]))
+            return
+        }
         #endif
 
         let state = AppState.shared
@@ -238,6 +253,59 @@ enum MenuDump {
                     let shortcut = item.keyEquivalent.isEmpty ? "" : "  \(modifiers)\(item.keyEquivalent)"
                     print("    \(item.isSeparatorItem ? "---" : item.title)\(shortcut)")
                 }
+            }
+            NSApp.terminate(nil)
+        }
+    }
+
+    /// Prints the menu-bar mic menu, picks "Bangla" through it, prints it
+    /// again to show the check moved, then restores the user's language.
+    @MainActor
+    static func statusMenu() {
+        let state = AppState.shared
+        let controller = StatusBarController.makeController()
+        state.attachStatusBar(controller)
+        let original = state.settings.language
+        let menu = NSMenu()
+        func dump(_ title: String) {
+            controller.menuNeedsUpdate(menu)
+            print("[\(title)]")
+            for item in menu.items {
+                print("    \(item.isSeparatorItem ? "---" : (item.state == .on ? "✓ " : "  ") + item.title)")
+            }
+        }
+        dump("status menu")
+        if let index = menu.items.firstIndex(where: { $0.title == SpeechLanguage.banglaOnly.label }) {
+            menu.performActionForItem(at: index)
+        }
+        dump("after choosing \(SpeechLanguage.banglaOnly.label)")
+        print("settings.language = \(state.settings.language.rawValue)")
+        state.settings.language = original
+        NSApp.terminate(nil)
+    }
+}
+#endif
+
+#if DEBUG
+/// `UFlow --transcribe <mode> <file.wav>…` prints what each file would type
+/// in that mode (english, banglish, bangla, banglaOnly) and how long it took,
+/// then quits. Same engine, models and routing as a live dictation.
+enum FileTranscription {
+    @MainActor static func run(_ args: [String]) {
+        Task {
+            let engine = SpeechEngine()
+            if let mode = args.first.flatMap(SpeechLanguage.init(rawValue:)) { await engine.setLanguage(mode) }
+            do {
+                try await engine.prepare()
+                for path in args.dropFirst() {
+                    let started = ContinuousClock.now
+                    let text = try await engine.transcribe(file: URL(filePath: path))
+                    let ms = Int((ContinuousClock.now - started) / .milliseconds(1))
+                    print("\(path)\t\(ms)ms\t\(FillerFilter.apply(to: text))")
+                    fflush(stdout)
+                }
+            } catch {
+                print("ERROR \(error.localizedDescription)")
             }
             NSApp.terminate(nil)
         }

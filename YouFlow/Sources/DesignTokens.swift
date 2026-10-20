@@ -343,7 +343,7 @@ enum Tok {
         static let logoMarkSize: CGFloat = 72
 
         // The floating recorder bar shown while dictating into another app.
-        static let hudWidth: CGFloat = 276
+        static let hudWidth: CGFloat = 300   // room for the language caption beside a full MM:SS readout
         static let hudHeight: CGFloat = 38
         static let hudBarCount = 28
         static let hudBarWidth: CGFloat = 2.5

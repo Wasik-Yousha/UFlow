@@ -85,7 +85,11 @@ final class AppState: ObservableObject, StatusInfoProvider {
     private var originApp: NSRunningApplication?
     private var origin: Origin = .hotkey
     private var enginePrepared = false
-    private var engineDetailText = "Preparing speech engine…"
+    /// Prepares can overlap (a mode switch during a download), so count them.
+    private var preparesInFlight = 0
+    private var isPreparingEngine: Bool { preparesInFlight > 0 }
+    /// Published so Settings can show the one-time model download as it runs.
+    @Published private(set) var engineDetailText = "Preparing speech engine…"
     private var elapsedTimer: Timer?
     private var cancellables: Set<AnyCancellable> = []
 
@@ -156,14 +160,21 @@ final class AppState: ObservableObject, StatusInfoProvider {
         _ = await permissionManager.requestPostEventAccessIfNeeded()
         permissionManager.promptAccessibilityIfNeeded()
 
+        // Hotkey first: a Bangla model can take minutes to download, and the
+        // app must answer the key meanwhile ("Downloading… 40%"), not sit on
+        // "Starting…".
+        attemptHotkeyInstall()
+
         // Engine preparation only requires the microphone — decoupled from
         // event-tap permissions so speech assets download even while the user
         // is still approving Input Monitoring.
         if permissionManager.state.microphoneGranted {
             await prepareEngineIfPossible()
+            if enginePrepared, hotkeyManager.isInstalled, permissionManager.state.allGranted,
+               case .unavailable = state {
+                state = .ready
+            }
         }
-
-        attemptHotkeyInstall()
         Log.app.info("Bootstrap finished in state \(String(describing: self.state), privacy: .public)")
     }
 
@@ -209,21 +220,30 @@ final class AppState: ObservableObject, StatusInfoProvider {
     }
 
     private func prepareEngineIfPossible() async {
+        let requested = settings.language
+        preparesInFlight += 1
+        defer { preparesInFlight -= 1 }
+        let progress = ProgressText()
         do {
             try await engine.prepare(progressHandler: { [weak self] fraction in
-                Task { @MainActor in
-                    self?.engineDetailText = "Downloading speech model… \(Int(fraction * 100))%"
-                }
+                // The download reports thousands of times; hop to the main
+                // actor only when the visible text actually changes.
+                guard let text = progress.update(fraction) else { return }
+                Task { @MainActor in self?.engineDetailText = text }
             })
+            // The user picked another mode meanwhile; its prepare owns the state.
+            guard settings.language == requested else { return }
             enginePrepared = true
             engineDetailText = "On-device \(settings.language.label) transcription"
             engineName = await engine.activeBackendName
             Log.speech.info("Engine prepared")
         } catch {
+            guard settings.language == requested else { return }
             enginePrepared = false
-            engineDetailText = "Engine unavailable"
-            if case .initializing = state {
-                state = .unavailable(error.localizedDescription)
+            engineDetailText = "Engine unavailable — \(error.localizedDescription)"
+            switch state {
+            case .initializing, .unavailable: state = .unavailable(error.localizedDescription)
+            default: break
             }
             Log.speech.error("Engine preparation failed: \(error.localizedDescription, privacy: .public)")
         }
@@ -394,6 +414,24 @@ final class AppState: ObservableObject, StatusInfoProvider {
             // On-demand engine preparation (first press after failed bootstrap,
             // or straight after a model change in Settings).
             if !enginePrepared {
+                // Mid-download (a 574 MB model can take minutes): say so and
+                // stop, rather than hold the key-press hostage until it lands.
+                guard !isPreparingEngine else {
+                    state = .unavailable(engineDetailText)
+                    SoundKit.play(.error)
+                    return
+                }
+                // Loading a Bangla model takes seconds, downloading one minutes:
+                // never inside a key press. Start it and say so.
+                if settings.language.usesWhisper {
+                    Task {
+                        await prepareEngineIfPossible()
+                        if enginePrepared, case .unavailable = state { state = .ready }
+                    }
+                    state = .unavailable("Preparing speech model…")
+                    SoundKit.play(.error)
+                    return
+                }
                 Log.hotkey.info("Engine not prepared — attempting quick prepare on demand")
                 await prepareEngineIfPossible()
                 guard enginePrepared else {
@@ -409,7 +447,7 @@ final class AppState: ObservableObject, StatusInfoProvider {
 
             // The floating HUD is for when the user is working in another app.
             // The window has its own meter.
-            if origin == .hotkey { hud.showRecording() }
+            if origin == .hotkey { hud.showRecording(mode: settings.language.shortLabel) }
 
             try await engine.startRecording { [weak self] level in
                 Task { @MainActor in
@@ -483,6 +521,8 @@ final class AppState: ObservableObject, StatusInfoProvider {
 
         } catch {
             Log.app.error("Session failed: \(error.localizedDescription, privacy: .public)")
+            // The model went missing or unloaded for good: re-prepare next press.
+            if case SpeechEngineError.notPrepared = error { enginePrepared = false }
             hud.hide()
             // Best-effort teardown so the mic is never left running.
             await engine.cancelSession()
@@ -514,6 +554,12 @@ extension AppState {
 
     var detailLine: String? {
         engineDetailText
+    }
+
+    var dictationLanguage: SpeechLanguage {
+        get { settings.language }
+        // Re-picking the checked mode must not reload the engine.
+        set { if newValue != settings.language { settings.language = newValue } }
     }
 
     func openSettingsRequested() {
@@ -558,3 +604,18 @@ extension AppState {
     }
 }
 #endif
+
+/// Turns raw download progress into status text, reporting only changes.
+private final class ProgressText: @unchecked Sendable {
+    private let lock = NSLock()
+    private var last = ""
+
+    func update(_ fraction: Double) -> String? {
+        let text = fraction < 1 ? "Downloading speech model… \(Int(fraction * 100))%" : "Loading speech model…"
+        return lock.withLock {
+            guard text != last else { return nil }
+            last = text
+            return text
+        }
+    }
+}

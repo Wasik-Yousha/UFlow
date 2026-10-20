@@ -136,6 +136,9 @@ final class ClipboardInjector {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.writeObjects([text as NSString])
+        // nspasteboard.org convention: clipboard managers skip transient
+        // items, so every dictation doesn't pile up in their history.
+        pasteboard.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.TransientType"))
         let ownedChangeCount = pasteboard.changeCount
 
         // Let the new pasteboard generation settle before the keystroke lands.
@@ -162,6 +165,12 @@ final class ClipboardInjector {
             restoreIfUnchanged(snapshot, ownedState: ownedChangeCount)
             return .injected
         } else {
+            // The kept copy is the safety net, so it must not be transient:
+            // rewrite it plain, unless something else has claimed the clipboard.
+            if pasteboard.changeCount == ownedChangeCount {
+                pasteboard.clearContents()
+                pasteboard.writeObjects([text as NSString])
+            }
             Log.clipboard.info("Clipboard restoration skipped: transcript kept for origin app delivery")
             return .injectedToOriginalApp
         }

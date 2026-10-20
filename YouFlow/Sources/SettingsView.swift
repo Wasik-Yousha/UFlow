@@ -67,10 +67,15 @@ struct SettingsView: View {
                         Text(language.label).tag(language)
                     }
                 }
-                .pickerStyle(.segmented)
+                .pickerStyle(.radioGroup) // four long labels don't fit segmented
                 Text(app.settings.language.detail)
                     .font(.callout)
                     .foregroundStyle(.secondary)
+                if app.settings.language.usesWhisper {
+                    Text(app.engineDetailText)
+                        .font(.callout)
+                        .foregroundStyle(Tok.C.accent)
+                }
 
                 Picker("Model", selection: Binding(
                     get: { app.settings.backend },
@@ -80,6 +85,7 @@ struct SettingsView: View {
                         Text(preference.label).tag(preference)
                     }
                 }
+                .disabled(app.settings.language == .banglaOnly) // the only mode with no Apple model
                 Text(app.settings.backend.detail)
                     .font(.callout)
                     .foregroundStyle(.secondary)

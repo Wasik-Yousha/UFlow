@@ -51,18 +51,34 @@ final class TranscriptAccumulator: @unchecked Sendable {
     private let lock = NSLock()
     private var finalizedParts: [String] = []
     private var volatileTail = ""
+    private var confidenceSum = 0.0
+    private var confidenceWeight = 0
+    private var finalizedWords: [AppleWord] = []
 
-    func append(_ rawText: String, isFinal: Bool) {
+    func append(_ rawText: String, isFinal: Bool, confidence: (sum: Double, weight: Int) = (0, 0),
+                words: [AppleWord] = []) {
         let text = String(rawText)
         lock.lock()
         defer { lock.unlock() }
         if isFinal {
             finalizedParts.append(text)
             volatileTail = ""
+            confidenceSum += confidence.sum
+            confidenceWeight += confidence.weight
+            finalizedWords += words
         } else {
             volatileTail = text
         }
     }
+
+    /// Character-weighted mean of the finalized results' confidence, nil when
+    /// the model reported none.
+    func meanConfidence() -> Double? {
+        lock.withLock { confidenceWeight > 0 ? confidenceSum / Double(confidenceWeight) : nil }
+    }
+
+    /// Finalized words with the model's confidence in each.
+    func words() -> [AppleWord] { lock.withLock { finalizedWords } }
 
     /// Assembled transcript from finalized results only. Chunks concatenate
     /// verbatim — Apple's result texts are designed to join seamlessly, and
@@ -88,6 +104,19 @@ final class TranscriptAccumulator: @unchecked Sendable {
             .filter { !$0.isEmpty }
             .joined(separator: " ")
     }
+}
+
+/// One word of Apple's transcript and how sure its model was of it.
+struct AppleWord: Sendable, Equatable {
+    let text: String
+    let confidence: Double
+}
+
+/// Apple's transcript of one recording.
+struct AppleTranscript: Sendable {
+    var text = ""
+    var confidence: Double?
+    var words: [AppleWord] = []
 }
 
 // MARK: - Errors
@@ -148,39 +177,50 @@ enum BackendPreference: String, CaseIterable, Codable, Sendable {
 
 // MARK: - Language
 
-/// What the user speaks. Apple ships no Bengali model, so Banglish rides the
-/// Indian-English model (South Asian accent, code-switching) plus a short bias
-/// list of common romanized Bangla words.
+/// What the user speaks. English runs on Apple's streaming model. Apple ships
+/// no Bengali model at all (checked: SpeechTranscriber, DictationTranscriber
+/// and SFSpeechRecognizer), so the Bangla modes run on on-device Whisper.
+/// The "English +" modes also run Apple's English model alongside, which
+/// writes any sentence spoken in English; Bangla only writes everything in
+/// Bangla script.
 enum SpeechLanguage: String, CaseIterable, Codable, Sendable {
     case english
-    case mixed
     case banglish
+    case bangla
+    case banglaOnly
+
+    var usesWhisper: Bool { self != .english }
+
+    /// Apple's English model listens alongside Whisper and takes the
+    /// sentences that were spoken in English.
+    var usesEnglishCompanion: Bool { self == .banglish || self == .bangla }
+
+    /// Caption on the recording HUD.
+    var shortLabel: String {
+        switch self {
+        case .english: "EN"
+        case .banglish: "Banglish"
+        case .bangla: "EN+বাংলা"
+        case .banglaOnly: "বাংলা"
+        }
+    }
 
     var label: String {
         switch self {
         case .english: "English"
-        case .mixed: "English + Banglish"
-        case .banglish: "Banglish"
+        case .banglish: "English + Banglish"
+        case .bangla: "English + Bangla"
+        case .banglaOnly: "Bangla"
         }
     }
 
     var detail: String {
         switch self {
-        case .english: "US English model. Best when you only speak English."
-        case .mixed: "Indian-English model. Handles a Bangladeshi accent and Bangla words mixed into English."
-        case .banglish: "Indian-English model, nudged toward romanized Bangla words. Add your own to the dictionary."
+        case .english: "Apple's streaming model. Fastest; English only."
+        case .banglish: "English words stay English and Bangla is typed as Banglish, even in the same sentence (\"My name is Yusha mane amar nam iusha\"). One-time 539 MB download; text appears a moment after you let go."
+        case .bangla: "English words stay English and Bangla is typed in Bangla script, even in the same sentence (\"My name is Yusha মানে আমার নাম ইউশা\"). One-time 539 MB download; text appears a moment after you let go."
+        case .banglaOnly: "Everything is typed in Bangla script, English words included (\"মিটিং\"). One-time 640 MB download; text appears a moment after you let go."
         }
-    }
-
-    var localeIdentifier: String { self == .english ? "en-US" : "en-IN" }
-
-    /// ponytail: a bias nudge, not a Bengali model — real Bangla needs Whisper.
-    /// Kept short: long contextual lists make these models invent text.
-    var biasTerms: [String] {
-        guard self == .banglish else { return [] }
-        return ["ami", "tumi", "apni", "ki", "keno", "kothay", "hobe", "korbo",
-                "korchi", "bhalo", "achi", "acho", "na", "hae", "ekhon", "kalke",
-                "bhai", "accha", "thik ache", "dhonnobad"]
     }
 }
 
@@ -222,6 +262,10 @@ actor SpeechEngine {
         let accumulator: TranscriptAccumulator
         let startedAt: ContinuousClock.Instant
         let yielded: YieldCounter
+        /// Bangla modes: the same mic audio at 16 kHz for Whisper.
+        let collector: SampleCollector?
+        /// The mode at key-down; a switch mid-recording applies to the next one.
+        let language: SpeechLanguage
     }
 
     // Preparation results (launch time).
@@ -230,6 +274,24 @@ actor SpeechEngine {
     private(set) var preparedFormat: AVAudioFormat?
 
     private var activeSession: ActiveSession?
+
+    /// English + Banglish: record while held, transcribe once on release.
+    private struct WhisperSession {
+        let audioEngine: AVAudioEngine
+        let collector: SampleCollector
+        let language: SpeechLanguage
+    }
+    private let banglaWhisper = WhisperEngine(model: .bangla)
+    private let banglishWhisper = WhisperEngine(model: .banglish)
+    /// The Whisper model for the current mode.
+    private var whisper: WhisperEngine { whisperEngine(for: language) }
+    /// Bangla only: the Bangla model (best pure Bangla). Both "English +"
+    /// modes: the code-switch model, the only one that keeps English words in
+    /// English letters mid-sentence.
+    private func whisperEngine(for language: SpeechLanguage) -> WhisperEngine {
+        language == .banglaOnly ? banglaWhisper : banglishWhisper
+    }
+    private var whisperSession: WhisperSession?
 
     /// Words the analyzer should lean toward. Kept deliberately short by the
     /// caller: a long contextual list makes these models drift and invent text
@@ -243,8 +305,8 @@ actor SpeechEngine {
     /// Which language model and bias the user asked for.
     private var language: SpeechLanguage = .english
 
-    var isPrepared: Bool { resolvedLocale != nil }
-    var isSessionActive: Bool { activeSession != nil }
+    var isPrepared: Bool { language.usesWhisper ? whisper.isReady : resolvedLocale != nil }
+    var isSessionActive: Bool { activeSession != nil || whisperSession != nil }
 
     // MARK: - Configuration
 
@@ -267,6 +329,12 @@ actor SpeechEngine {
     /// Chooses the language. Same rebuild rule as the backend.
     func setLanguage(_ newValue: SpeechLanguage) {
         guard newValue != language else { return }
+        // ~600 MB back now rather than in 5 min — unless the new mode runs
+        // the same model (English + Bangla ↔ English + Banglish).
+        if !isSessionActive, language.usesWhisper,
+           !newValue.usesWhisper || whisperEngine(for: newValue) !== whisper {
+            whisper.unload()
+        }
         language = newValue
         resolvedLocale = nil
         preparedFormat = nil
@@ -275,6 +343,7 @@ actor SpeechEngine {
 
     /// The backend actually in use, for display.
     var activeBackendName: String {
+        if language.usesWhisper { return whisper.isReady ? "Whisper (on-device)" : "Not ready" }
         guard resolvedLocale != nil else { return "Not ready" }
         return prefersDictationFallback ? "Dictation" : "Apple (streaming)"
     }
@@ -286,9 +355,33 @@ actor SpeechEngine {
     ///
     /// - Parameter progressHandler: receives asset download progress (0…1).
     func prepare(progressHandler: (@Sendable (Double) -> Void)? = nil) async throws {
+        if language.usesWhisper {
+            let requested = language, engine = whisper
+            try await engine.prepare(progress: progressHandler)
+            // The user switched modes while this downloaded or loaded: that
+            // model may not be needed now, and the newer prepare owns the rest.
+            guard language == requested else {
+                if !language.usesWhisper || whisper !== engine { engine.unload() }
+                return
+            }
+            // Apple's English model listens alongside Whisper and writes the
+            // utterances that turn out to be pure English. Optional: without
+            // it, Whisper handles everything.
+            guard language.usesEnglishCompanion else { return }
+            do {
+                try await prepareApple(progressHandler: nil)
+            } catch {
+                Log.speech.notice("English companion unavailable: \(error.localizedDescription, privacy: .public)")
+            }
+            return
+        }
+        try await prepareApple(progressHandler: progressHandler)
+    }
+
+    private func prepareApple(progressHandler: (@Sendable (Double) -> Void)?) async throws {
         guard resolvedLocale == nil else { return }
 
-        let requestedLocale = Locale(identifier: language.localeIdentifier)
+        let requestedLocale = Locale(identifier: "en-US")
         let useFallback: Bool
         let locale: Locale
 
@@ -309,14 +402,14 @@ actor SpeechEngine {
         // Ensure assets with a throwaway module, then discard it.
         let probeModule: any SpeechModule = useFallback
             ? DictationTranscriber(locale: locale, preset: .progressiveShortDictation)
-            : SpeechTranscriber(locale: locale, preset: .progressiveTranscription)
+            : Self.makeTranscriber(locale)
         try await ensureAssets(for: [probeModule], progressHandler: progressHandler)
 
         // Prewarm model loading with a throwaway backend + analyzer, then
         // release both so no live module carries a lingering analyzer claim.
         let prewarmBackend: Backend = useFallback
             ? .dictation(DictationTranscriber(locale: locale, preset: .progressiveShortDictation))
-            : .transcriber(SpeechTranscriber(locale: locale, preset: .progressiveTranscription))
+            : .transcriber(Self.makeTranscriber(locale))
         let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: prewarmBackend.modules)
         let prewarmAnalyzer = SpeechAnalyzer(
             modules: prewarmBackend.modules,
@@ -353,6 +446,16 @@ actor SpeechEngine {
         }
     }
 
+    /// The streaming preset plus per-word confidence, which the Bangla modes
+    /// use to tell an English utterance from a Bangla one.
+    private static func makeTranscriber(_ locale: Locale) -> SpeechTranscriber {
+        let preset = SpeechTranscriber.Preset.progressiveTranscription
+        return SpeechTranscriber(locale: locale,
+                                 transcriptionOptions: preset.transcriptionOptions,
+                                 reportingOptions: preset.reportingOptions,
+                                 attributeOptions: preset.attributeOptions.union([.transcriptionConfidence]))
+    }
+
     /// Builds a fresh module set for a new session. Cheap: the underlying
     /// models remain resident via process-lifetime retention.
     private func makeBackend() throws -> Backend {
@@ -360,7 +463,7 @@ actor SpeechEngine {
         if prefersDictationFallback {
             return .dictation(DictationTranscriber(locale: locale, preset: .progressiveShortDictation))
         }
-        return .transcriber(SpeechTranscriber(locale: locale, preset: .progressiveTranscription))
+        return .transcriber(Self.makeTranscriber(locale))
     }
 
     // MARK: - Session control
@@ -372,7 +475,17 @@ actor SpeechEngine {
     ///   audio buffer, for the HUD waveform. Called on the realtime audio
     ///   thread — the handler must hop to its own actor and stay cheap.
     func startRecording(onLevel: (@Sendable (Float) -> Void)? = nil) async throws {
-        guard activeSession == nil else { throw SpeechEngineError.sessionAlreadyActive }
+        guard activeSession == nil, whisperSession == nil else { throw SpeechEngineError.sessionAlreadyActive }
+        var collector: SampleCollector?
+        if language.usesWhisper {
+            guard whisper.isReady else { throw SpeechEngineError.notPrepared }
+            whisper.preload()
+            guard language.usesEnglishCompanion, resolvedLocale != nil else {
+                try startWhisperRecording(onLevel: onLevel)
+                return
+            }
+            collector = SampleCollector()
+        }
         let backend = try makeBackend()
         let modules = backend.modules
 
@@ -416,10 +529,9 @@ actor SpeechEngine {
         )
         // Contextual biasing. This is the only thing the dictionary changes
         // about recognition itself; everything else it does happens afterwards.
-        let allBiasTerms = biasTerms + language.biasTerms
-        if !allBiasTerms.isEmpty {
+        if !biasTerms.isEmpty {
             let context = AnalysisContext()
-            context.contextualStrings[.general] = allBiasTerms
+            context.contextualStrings[.general] = biasTerms
             do {
                 try await analyzer.setContext(context)
             } catch {
@@ -436,10 +548,20 @@ actor SpeechEngine {
             throw SpeechEngineError.analysisFailed(error.localizedDescription)
         }
 
+        // Bangla modes: Whisper hears the same buffers, at its own 16 kHz mono.
+        let whisperFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: WhisperEngine.sampleRate,
+                                          channels: 1, interleaved: false)!
+        let whisperConverter = collector != nil && whisperFormat != hardwareFormat
+            ? AVAudioConverter(from: hardwareFormat, to: whisperFormat) : nil
+
         // Lightweight realtime tap: convert the buffer and yield it onward.
         let counter = YieldCounter()
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: hardwareFormat) { buffer, _ in
             onLevel?(Self.normalizedLevel(of: buffer))
+            if let collector, let mono = Self.converted(buffer, with: whisperConverter, to: whisperFormat),
+               let channel = mono.floatChannelData?[0] {
+                collector.append(UnsafeBufferPointer(start: channel, count: Int(mono.frameLength)))
+            }
             guard let output = Self.converted(buffer, with: converter, to: targetFormat) else { return }
             counter.count += 1
             continuation.yield(AnalyzerInput(buffer: output))
@@ -462,7 +584,9 @@ actor SpeechEngine {
             consumerTask: consumerTask,
             accumulator: accumulator,
             startedAt: ContinuousClock.now,
-            yielded: counter
+            yielded: counter,
+            collector: collector,
+            language: language
         )
         Log.speech.info("Recording started")
     }
@@ -471,7 +595,54 @@ actor SpeechEngine {
     /// transcript, and tears the session down. Returns the final text (possibly
     /// empty — callers decide what to do with that).
     func stopRecordingAndCollect() async -> String {
+        if let session = whisperSession { return await stopWhisperRecording(session) }
         guard let session = activeSession else { return "" }
+        guard let collector = session.collector else { return await finishApple(session).text }
+
+        // Bangla modes: Whisper starts on the recording while Apple finalizes.
+        // Apple is done first; when it is sure the speech was English its text
+        // goes out without waiting for Whisper.
+        session.audioEngine.inputNode.removeTap(onBus: 0)
+        session.audioEngine.stop()
+        let samples = collector.drain()
+        let mode = session.language
+        let whisperTask = Task { await self.transcribeWhisper(samples, mode: mode) }
+        return await pick(english: await finishApple(session), whisper: whisperTask, mode: mode)
+    }
+
+    /// Apple's text when it is sure the speech was English, else Whisper's.
+    private func pick(english: AppleTranscript, whisper: Task<String, Never>, mode: SpeechLanguage) async -> String {
+        if let confidence = english.confidence, confidence >= Self.englishConfidence, !english.text.isEmpty {
+            // Stop the now-pointless decode, or the next dictation queues
+            // behind it (measured: a Bangla clip after three English ones
+            // waited 12.7 s instead of ~1.4 s).
+            whisper.cancel()
+            Log.speech.info("Routed to Apple (confidence \(confidence, privacy: .public))")
+            return english.text
+        }
+        return route(heard: await whisper.value, english: english, mode: mode)
+    }
+
+    /// Apple's mean word confidence that marks an utterance as English.
+    /// Measured on 320 clips: English 0.915–0.990, Bangla 0.025–0.534,
+    /// code-mixed 0.000–0.745. ponytail: calibration knob — the English set
+    /// was synthetic speech; lower toward 0.78 if accented English lands in
+    /// the Bangla model.
+    private static let englishConfidence = 0.82
+
+    /// Whisper's transcript, unless it holds no Bangla script at all: then
+    /// the speech was English and Apple spells English far better (4.8% vs
+    /// 31% WER on our English set). In a mixed sentence the English words
+    /// take Apple's spelling one by one (`EnglishSpelling`).
+    private func route(heard: String, english: AppleTranscript, mode: SpeechLanguage) -> String {
+        let hasBangla = heard.unicodeScalars.contains { (0x0980...0x09FF).contains($0.value) }
+        if !hasBangla, !english.text.isEmpty { return english.text }
+        let spelled = EnglishSpelling.apply(to: heard, apple: english.words)
+        return mode == .banglish ? BanglaRomanizer.apply(to: spelled) : spelled
+    }
+
+    /// Stops Apple's analyzer and collects its final transcript and confidence.
+    private func finishApple(_ session: ActiveSession) async -> AppleTranscript {
 
         // Finalization of a long recording legitimately takes longer than a
         // short one, so scale the safety budget with the session duration
@@ -496,7 +667,7 @@ actor SpeechEngine {
         // transcribe anyway.
         guard session.yielded.count > 0 else {
             await cancelSession()
-            return ""
+            return AppleTranscript()
         }
 
         // 3) Ask the analyzer to finalize everything received so far. Bounded
@@ -544,12 +715,20 @@ actor SpeechEngine {
         let text = session.accumulator.finalText()
         activeSession = nil
         Log.speech.info("Recording stopped; transcript collected (\(text.isEmpty ? "empty" : "non-empty", privacy: .public))")
-        return text
+        return AppleTranscript(text: text, confidence: session.accumulator.meanConfidence(),
+                               words: session.accumulator.words())
     }
 
     /// Cancels the active session without producing a transcript. Used for
     /// accidental taps and unrecoverable errors.
     func cancelSession() async {
+        if let session = whisperSession {
+            session.audioEngine.inputNode.removeTap(onBus: 0)
+            session.audioEngine.stop()
+            whisperSession = nil
+            Log.speech.info("Session cancelled")
+            return
+        }
         guard let session = activeSession else { return }
         session.audioEngine.inputNode.removeTap(onBus: 0)
         session.audioEngine.stop()
@@ -569,6 +748,70 @@ actor SpeechEngine {
         }
         activeSession = nil
         Log.speech.info("Session cancelled")
+    }
+
+    // MARK: - Whisper session
+
+    private func startWhisperRecording(onLevel: (@Sendable (Float) -> Void)?) throws {
+        let audioEngine = AVAudioEngine()
+        let inputNode = audioEngine.inputNode
+        let hardwareFormat = inputNode.inputFormat(forBus: 0)
+        guard hardwareFormat.sampleRate > 0, hardwareFormat.channelCount > 0,
+              let targetFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: WhisperEngine.sampleRate,
+                                               channels: 1, interleaved: false)
+        else { throw SpeechEngineError.microphoneFormatUnavailable }
+        let converter = targetFormat != hardwareFormat ? AVAudioConverter(from: hardwareFormat, to: targetFormat) : nil
+
+        let collector = SampleCollector()
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: hardwareFormat) { buffer, _ in
+            onLevel?(Self.normalizedLevel(of: buffer))
+            guard let output = Self.converted(buffer, with: converter, to: targetFormat),
+                  let channel = output.floatChannelData?[0] else { return }
+            collector.append(UnsafeBufferPointer(start: channel, count: Int(output.frameLength)))
+        }
+        do {
+            audioEngine.prepare()
+            try audioEngine.start()
+        } catch {
+            inputNode.removeTap(onBus: 0)
+            throw SpeechEngineError.audioStartFailed(error.localizedDescription)
+        }
+        whisperSession = WhisperSession(audioEngine: audioEngine, collector: collector, language: language)
+        Log.speech.info("Recording started")
+    }
+
+    /// When even the loudest 100 ms of a clip is below this RMS, the clip is
+    /// room noise — and near-silence is exactly where Whisper invents text
+    /// ("Thank you."). About -55 dBFS. Judged on the loudest window, not the
+    /// whole clip, so a long hold with a short phrase in it still counts.
+    /// ponytail: calibration knob — lower it if a quiet mic gets skipped.
+    private static let silenceRMS: Float = 0.0018
+
+    static func loudestWindowRMS(_ samples: [Float], window: Int = 1600) -> Float {
+        stride(from: 0, to: samples.count, by: window).reduce(Float(0)) { loudest, start in
+            let chunk = samples[start..<min(start + window, samples.count)]
+            return max(loudest, (chunk.reduce(0) { $0 + $1 * $1 } / Float(chunk.count)).squareRoot())
+        }
+    }
+
+    private func stopWhisperRecording(_ session: WhisperSession) async -> String {
+        session.audioEngine.inputNode.removeTap(onBus: 0)
+        session.audioEngine.stop()
+        whisperSession = nil
+        let heard = await transcribeWhisper(session.collector.drain(), mode: session.language)
+        return route(heard: heard, english: AppleTranscript(), mode: session.language)
+    }
+
+    /// Whisper's raw transcript of one recording, or "" for silence.
+    private func transcribeWhisper(_ samples: [Float], mode: SpeechLanguage) async -> String {
+        Log.speech.info("Audio samples delivered to Whisper: \(samples.count, privacy: .public)")
+        guard samples.count >= Int(WhisperEngine.sampleRate * 0.3), Self.loudestWindowRMS(samples) >= Self.silenceRMS else {
+            Log.speech.info("Too short or silent — nothing to transcribe")
+            return ""
+        }
+        let heard = await whisperEngine(for: mode).transcribe(samples)
+        Log.speech.info("Whisper transcript collected (\(heard.isEmpty ? "empty" : "non-empty", privacy: .public))")
+        return heard
     }
 
     // MARK: - Internals
@@ -599,7 +842,18 @@ actor SpeechEngine {
     ) async where S.Element: TextualSpeechResult {
         do {
             for try await result in sequence {
-                accumulator.append(String(result.text.characters), isFinal: result.isFinal)
+                var confidence = (sum: 0.0, weight: 0)
+                var words: [AppleWord] = []
+                for run in result.text.runs {
+                    guard let value = run.transcriptionConfidence else { continue }
+                    let text = String(result.text[run.range].characters)
+                    let letters = text.filter { !$0.isWhitespace }.count
+                    confidence.sum += value * Double(letters)
+                    confidence.weight += letters
+                    words += text.split(whereSeparator: \.isWhitespace).map { AppleWord(text: String($0), confidence: value) }
+                }
+                accumulator.append(String(result.text.characters), isFinal: result.isFinal,
+                                   confidence: confidence, words: words)
             }
         } catch is CancellationError {
             // Expected on cancellation paths.
@@ -649,6 +903,25 @@ final class YieldCounter: @unchecked Sendable {
     var count = 0
 }
 
+/// Mic samples for one Whisper session: appended on the realtime tap thread,
+/// drained once after the tap is removed.
+final class SampleCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var samples: [Float] = []
+
+    func append(_ chunk: UnsafeBufferPointer<Float>) {
+        lock.lock()
+        samples.append(contentsOf: chunk)
+        lock.unlock()
+    }
+
+    func drain() -> [Float] {
+        lock.lock()
+        defer { lock.unlock() }
+        return samples
+    }
+}
+
 extension SpeechEngine {
     /// Converts one mic buffer into the analyzer's format.
     ///
@@ -692,3 +965,50 @@ extension SpeechEngine {
         return output.frameLength > 0 ? output : nil
     }
 }
+
+#if DEBUG
+// MARK: - File test hook
+
+extension SpeechEngine {
+    /// Runs a recording through the same models, routing and romanizing as a
+    /// live dictation; only the microphone is replaced by the file. Backs
+    /// `--transcribe` (debug builds only).
+    func transcribe(file url: URL) async throws -> String {
+        let file = try AVAudioFile(forReading: url)
+        guard let pcm = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)),
+              let mono = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: WhisperEngine.sampleRate,
+                                       channels: 1, interleaved: false) else { return "" }
+        try file.read(into: pcm)
+        let converter = pcm.format == mono ? nil : AVAudioConverter(from: pcm.format, to: mono)
+        let converted = Self.converted(pcm, with: converter, to: mono)
+        let samples = converted.flatMap { buffer in
+            buffer.floatChannelData.map { Array(UnsafeBufferPointer(start: $0[0], count: Int(buffer.frameLength))) }
+        } ?? []
+
+        guard language.usesWhisper else { return try await appleTranscript(of: url).text }
+        let mode = language
+        let whisperTask = Task { await self.transcribeWhisper(samples, mode: mode) }
+        guard mode.usesEnglishCompanion, resolvedLocale != nil else {
+            return route(heard: await whisperTask.value, english: AppleTranscript(), mode: mode)
+        }
+        return await pick(english: try await appleTranscript(of: url), whisper: whisperTask, mode: mode)
+    }
+
+    private func appleTranscript(of url: URL) async throws -> AppleTranscript {
+        let backend = try makeBackend()
+        let accumulator = TranscriptAccumulator()
+        let consumer = Task {
+            switch backend {
+            case .transcriber(let t): await self.drain(t.results, into: accumulator)
+            case .dictation(let d): await self.drain(d.results, into: accumulator)
+            }
+        }
+        let analyzer = SpeechAnalyzer(modules: backend.modules,
+                                      options: .init(priority: .userInitiated, modelRetention: .processLifetime))
+        try await analyzer.start(inputAudioFile: AVAudioFile(forReading: url), finishAfterFile: true)
+        await consumer.value
+        return AppleTranscript(text: accumulator.finalText(), confidence: accumulator.meanConfidence(),
+                               words: accumulator.words())
+    }
+}
+#endif

@@ -23,6 +23,8 @@ final class HUDViewModel: ObservableObject {
     @Published var phase: Phase = .recording
     @Published var levels: [CGFloat] = Array(repeating: 0, count: barCount)
     @Published var startedAt = Date()
+    /// The dictation language, captioned beside the REC lamp.
+    @Published var mode = ""
 
     func reset() {
         levels = Array(repeating: 0, count: Self.barCount)
@@ -87,8 +89,9 @@ final class HUDPanelController {
 
     // MARK: - Show / hide
 
-    func showRecording() {
+    func showRecording(mode: String) {
         viewModel.reset()
+        viewModel.mode = mode
         show(phase: .recording)
     }
 
@@ -206,7 +209,9 @@ private struct HUDContentView: View {
                 // width to 340pt inside a 276pt panel — the content outgrew
                 // its own window, and the slack showed up as dead chassis
                 // beside the lamp.
-                PhaseLamp(label: "Rec", blinkingSince: viewModel.startedAt)
+                // The blinking lamp already says "recording", so the caption
+                // names the language instead of repeating "Rec".
+                PhaseLamp(label: viewModel.mode, blinkingSince: viewModel.startedAt)
                 LevelWell(levels: viewModel.levels)
                 CounterReadout(since: viewModel.startedAt)
 
@@ -420,10 +425,35 @@ private struct CounterReadout: View {
         TimelineView(.periodic(from: since, by: 1)) { context in
             SevenSegmentClock(seconds: context.date.timeIntervalSince(since))
         }
-        .frame(height: Tok.L.hudWaveHeight)
+        // The clock is a Canvas with no width of its own; 4 digits + colon
+        // need 102 units per 40 of height, so claim exactly that.
+        .frame(width: Tok.L.hudWaveHeight * 102 / 40, height: Tok.L.hudWaveHeight)
         .padding(.vertical, Tok.S.s4)
         .padding(.horizontal, Tok.S.s6)
         .background(Tok.C.ledWindow, in: RoundedRectangle(cornerRadius: Tok.R.panel, style: .continuous))
         .emboss(Tok.R.panel, inset: true)
     }
 }
+
+#if DEBUG
+extension HUDPanelController {
+    /// `UFlow --snapshot-hud <dir>`: renders the recording HUD once per
+    /// language caption to <dir>/hud-<mode>.png, then quits.
+    static func snapshot(to directory: String) {
+        let controller = HUDPanelController()
+        for language in SpeechLanguage.allCases {
+            controller.showRecording(mode: language.shortLabel)
+            controller.viewModel.startedAt = Date().addingTimeInterval(-83)   // reads 01:23
+            for i in 0..<HUDViewModel.barCount { controller.viewModel.push(CGFloat(0.2 + 0.6 * abs(sin(Double(i) / 3)))) }
+            guard let view = controller.panel.contentView else { continue }
+            view.layoutSubtreeIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+            guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
+            view.cacheDisplay(in: view.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?
+                .write(to: URL(filePath: "\(directory)/hud-\(language.rawValue).png"))
+        }
+        NSApp.terminate(nil)
+    }
+}
+#endif

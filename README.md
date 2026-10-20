@@ -11,9 +11,36 @@ Hold Fn,   talk,   let go to STOP. The text lands where your cursor was, instant
 
 **Free.** Not free-trial, not free-tier. There is nothing to subscribe to, no account to make, and no server to send your voice to, because there is no server.
 
-**Fast.** The model runs on your Mac, not on somebody's GPU in Virginia. Transcription happens while you're still talking, so the text is already waiting when you stop. No upload, no queue, no spinner.
+**Fast.** The model runs on your Mac, not on somebody's GPU in Virginia. English is transcribed while you're still talking, so the text is already waiting when you stop. No upload, no queue, no spinner.
 
-**[Download UFlow 1.1.2](https://github.com/Wasik-Yousha/UFlow/releases/latest)** · macOS 26+ · Apple Silicon · your voice never leaves the machine
+**[Download UFlow 1.2](https://github.com/Wasik-Yousha/UFlow/releases/latest)** · macOS 26+ · Apple Silicon (M1 and later) · your voice never leaves the machine
+
+Install in one line — paste into Terminal:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Wasik-Yousha/UFlow/main/scripts/install.sh | bash
+```
+
+## 🇧🇩 New in 1.2: UFlow speaks Bangla
+
+**Bangla and Banglish dictation, on your Mac, offline, free.** Talk the way you actually talk — English and Bangla in the same sentence — and UFlow types each word in the script you want. As far as I could find, nothing else does this on-device: macOS, Windows and iOS have no Bengali dictation at all.
+
+Say *"My name is Yusha, mane amar nam Yusha"* and pick how it comes out:
+
+| Language mode | UFlow types |
+|:--|:--|
+| **English + Bangla** | My name is Yusha মানে আমার নাম ইউশা |
+| **English + Banglish** | My name is Yusha mane amar nam iusha |
+| **Bangla** | মায় নেম ইজ ইউশা মানে আমার নাম ইউশা |
+| **English** | Apple's English model, exactly as before |
+
+- **Switch from the menu bar.** Click the mic icon → *Language*, one click from any app. The recorder bar shows the active mode while you talk.
+- **English stays English.** In the English + modes a sentence you say in English is written by Apple's own English model, instantly; in a mixed sentence each English word keeps its English spelling.
+- **One-time download.** The first time you pick a Bangla mode UFlow fetches its speech model (539 MB for the English + modes, 640 MB for Bangla), checks it, and works offline from then on.
+- **Measured, not guessed.** Pure Bangla: 7.4% word error rate (Google FLEURS). Bangla–English mixed speech: 34.7% (MUCS 2021) — stock Whisper large-v3-turbo scored 65% and 102% on the same clips.
+- **Text in under a second** after you let go (median 0.7 s on an M4 Pro); slower Macs switch themselves to a faster decoding mode.
+
+Built on [whisper.cpp](https://github.com/ggml-org/whisper.cpp) with the [Bengali.AI 2023 winning model](https://huggingface.co/bengaliAI/tugstugi_bengaliai-asr_whisper-medium) and its [Bengali-English code-switch fine-tune](https://huggingface.co/kayees/whisper-medium-bn-en-cs) (both Apache-2.0).
 
 <img src="docs/deck.png" width="820" alt="">
 
@@ -107,7 +134,7 @@ Two things happen after that no agent can do on your behalf, because they're OS 
 
 Once granted, UFlow runs as a background menu-bar app with no Dock icon, and **hold `Fn` to talk** is the default hotkey — nothing else to set up.
 
-If you'd rather use the download button: grab the `.dmg` from [Download UFlow 1.1.2](https://github.com/Wasik-Yousha/UFlow/releases/latest) , drag UFlow to Applications, try to open it, get refused, Click Done.
+If you'd rather use the download button: grab the `.dmg` from [Download UFlow 1.2](https://github.com/Wasik-Yousha/UFlow/releases/latest) , drag UFlow to Applications, try to open it, get refused, Click Done.
 
 ⚠️ Not "Move to Trash" — Apple styles the destructive button green and makes it the visually obvious one.
 
@@ -135,7 +162,7 @@ cd ~/Downloads
 shasum -a 256 -c <(curl -fsSL https://github.com/Wasik-Yousha/UFlow/releases/latest/download/SHA256SUMS)
 ```
 
-`UFlow-1.1.2.dmg: OK` means the file you have is byte-for-byte the one that was built here.
+`UFlow-1.2.dmg: OK` means the file you have is byte-for-byte the one that was built here.
 It confirms the download arrived intact — it is not a signature, and it is not a substitute
 for notarization. If it ever says `FAILED`, don't install it.
 
@@ -162,7 +189,13 @@ cp -R build/DerivedData/Build/Products/Release/UFlow.app /Applications/
 
 Or just open the project in Xcode and hit Run.
 
-`./scripts/make-dmg.sh` packages a disk image. Debug builds also carry `--self-check`, which runs the correction engine against about a dozen cases that have all bitten me at some point, and `--dump-menu`, which prints the menu bar (added because I was convinced Settings had gone missing; it hadn't).
+`./scripts/make-dmg.sh` packages a disk image. whisper.cpp ships prebuilt in `YouFlow/Vendor`, so there's nothing else to install.
+
+Debug builds also carry a few test switches:
+
+- `--self-check` runs the correction engine, filler filter, romanizer and language merge against the cases that have all bitten me at some point.
+- `--transcribe <mode> <file.wav>…` runs audio files through the same models and routing as a live dictation (`english`, `banglish`, `bangla`, `banglaOnly`).
+- `--dump-menu` / `--dump-status-menu` print the menus (added because I was convinced Settings had gone missing; it hadn't).
 
 ## How it was built
 
@@ -178,8 +211,9 @@ YouFlow/Sources/
   DesignTokens.swift          every visual value in the app
   DictationApp.swift          entry point, scenes, menus
   AppState.swift              coordinates a dictation session
-  SpeechEngine.swift          Apple Speech + microphone capture
-  TranscriptProcessor.swift   the dictionary's correction pass
+  SpeechEngine.swift          microphone capture, Apple Speech, language routing
+  WhisperEngine.swift         on-device Bangla models (whisper.cpp)
+  TranscriptProcessor.swift   dictionary, fillers, Banglish romanizer, English spelling
   Persistence.swift           dictionary, history, settings
   HotkeyManager.swift         global event tap
   ClipboardInjector.swift     getting text into other apps
@@ -197,11 +231,11 @@ YouFlow/Sources/
 
 **macOS 26 or newer only.** The whole transcription path is Apple's `SpeechAnalyzer`, which doesn't exist before that. Making it run on older systems means a second engine, not a config flag — that's [issue #1](https://github.com/Wasik-Yousha/UFlow/issues/1), and it's in progress.
 
-**English only**, because that's the locale the engine gets asked for.
+**Bangla is transcribed when you let go**, not while you talk — there's no streaming Bangla model that runs on a Mac yet. Mixed sentences packed with technical terms ("numpy linalg eigvals") are still the hardest case.
 
 **Not notarized**, see above.
 
-**Apple Silicon.** Untested on Intel and probably not worth the effort.
+**Apple Silicon only** (M1 and later). Untested on Intel and probably not worth the effort.
 
 ---
 

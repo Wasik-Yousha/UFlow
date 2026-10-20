@@ -12,6 +12,8 @@ protocol StatusInfoProvider: AnyObject {
     var detailLine: String? { get }
     /// Opens the most relevant System Settings privacy pane.
     func openSettingsRequested()
+    /// The dictation language, switchable straight from the menu.
+    var dictationLanguage: SpeechLanguage { get set }
 }
 
 /// Owns the NSStatusItem: a small mic glyph plus the status menu described in
@@ -78,6 +80,18 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             let detailItem = NSMenuItem(title: detail, action: nil, keyEquivalent: "")
             detailItem.isEnabled = false
             menu.addItem(detailItem)
+        }
+
+        // One click from any app: the language is the setting people change
+        // most, so it sits right under the status line.
+        menu.addItem(.separator())
+        menu.addItem(.sectionHeader(title: "Language"))
+        for language in SpeechLanguage.allCases {
+            let item = NSMenuItem(title: language.label, action: #selector(languageClicked(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = language.rawValue
+            item.state = provider.dictationLanguage == language ? .on : .off
+            menu.addItem(item)
         }
 
         menu.addItem(.separator())
@@ -167,6 +181,12 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     /// The System Settings privacy pane, which is a different thing entirely.
     @objc private func openPrivacyClicked() {
         provider?.openSettingsRequested()
+    }
+
+    @objc private func languageClicked(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let language = SpeechLanguage(rawValue: raw) else { return }
+        provider?.dictationLanguage = language
     }
 
     @objc private func quitClicked() {
