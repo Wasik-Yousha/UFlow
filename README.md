@@ -29,8 +29,8 @@ Say *"My name is Yusha, mane amar nam Yusha"* and pick how it comes out:
 
 | Language mode | UFlow types |
 |:--|:--|
-| **English + Bangla** | My name is Yusha মানে আমার নাম ইউশা |
-| **English + Banglish** | My name is Yusha mane amar nam iusha |
+| **English + Bangla** | My name is Yousha মানে আমার নাম ইউশা |
+| **English + Banglish** | My name is Yousha mane amar nam Yousha |
 | **Bangla** | মায় নেম ইজ ইউশা মানে আমার নাম ইউশা |
 | **English** | Apple's English model, exactly as before |
 
