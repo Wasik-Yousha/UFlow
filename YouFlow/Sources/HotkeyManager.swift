@@ -100,21 +100,62 @@ final class HotkeyManager {
     private var runLoopSource: CFRunLoopSource?
 
     // Raw key states (main thread only — the tap source is added to the main run loop).
-    private var isModifierDown = false
-    private var isTriggerKeyDown = false
-    private var isActive = false
+    // Every change re-decides whether the hardware poller should run.
+    private var isModifierDown = false {
+        didSet {
+            // A fresh press: the poller must see the key held again before it
+            // may conclude it was released (see `reconcileWithHardware`).
+            if isModifierDown, !oldValue { modifierSeenHeld = Self.hardwareModifierHeld(trigger) }
+            updatePolling()
+        }
+    }
+    private var isTriggerKeyDown = false {
+        didSet {
+            if isTriggerKeyDown, !oldValue, let code = trigger.triggerKeyCode {
+                triggerKeySeenHeld = Self.hardwareKeyHeld(code)
+            }
+            updatePolling()
+        }
+    }
+    private var isActive = false { didSet { updatePolling() } }
 
     /// How long a modifier alone must be held before dictation starts. Shorter
     /// than this is a tap and belongs to the system (Fn → emoji picker).
     /// ponytail: fixed delay — the calibration knob if taps start dictating
     /// (raise it) or holds feel sluggish (lower it).
     static let holdDelay: TimeInterval = 0.3
-    private var holdTimer: Timer?
+    private var holdTimer: Timer? { didSet { updatePolling() } }
+
+    // MARK: Lost key-up recovery
+    //
+    // The tap can miss a release: it is disabled by timeout, Secure Event
+    // Input switches on mid-hold, the Mac sleeps, another tap swallows it.
+    // Without a fix the chord stays "down" forever — recording never stops
+    // (hold mode) or the next tap is ignored as a duplicate (toggle mode).
+    // So while any tracked key is believed down, the real keyboard state is
+    // polled and a release the tap never saw is synthesized through the same
+    // path as a real one.
+
+    /// How often the hardware state is checked while a key is believed down.
+    static let hardwarePollInterval: TimeInterval = 0.25
+    private var pollTimer: Timer?
+    /// The hardware query reported the key held at least once during this
+    /// press. Only then is a "not held" reading trusted, so an API that never
+    /// reports the key (unusual hardware/remapping) leaves the poller inert
+    /// instead of cutting every dictation short.
+    private var modifierSeenHeld = false
+    private var triggerKeySeenHeld = false
 
     /// Called on the main thread when the chord completes (start dictation).
     var onTriggerDown: (() -> Void)?
     /// Called on the main thread when the chord breaks (stop dictation).
     var onTriggerUp: (() -> Void)?
+    /// Modifier-alone triggers: the key went down and a hold may follow, so
+    /// the microphone can start now instead of after `holdDelay`.
+    var onArm: (() -> Void)?
+    /// The press turned out to be a tap (or the modifier's normal job, like
+    /// Fn+Delete): whatever `onArm` started should be dropped.
+    var onDisarm: (() -> Void)?
 
     var isInstalled: Bool { tap != nil }
 
@@ -172,6 +213,9 @@ final class HotkeyManager {
         guard let tap else { return }
         CGEvent.tapEnable(tap: tap, enable: true)
         Log.hotkey.info("Event tap re-enabled")
+        // Events that arrived while the tap was off are gone: a release among
+        // them would otherwise leave the chord stuck down.
+        reconcileWithHardware()
     }
 
     // MARK: - Callback plumbing
@@ -261,12 +305,18 @@ final class HotkeyManager {
             let timer = Timer(timeInterval: Self.holdDelay, repeats: false) { [weak self] _ in
                 MainActor.assumeIsolated {
                     guard let self else { return }
+                    // A key-up lost inside the hold window would otherwise turn
+                    // a tap into a recording. If the hardware says released,
+                    // this resolves it as a tap (cancelHold → onDisarm).
+                    self.reconcileWithHardware()
+                    guard self.holdTimer != nil else { return }
                     self.holdTimer = nil
-                    if self.isModifierDown { self.setActive(true) }
+                    if self.isModifierDown { self.setActive(true) } else { self.onDisarm?() }
                 }
             }
             RunLoop.main.add(timer, forMode: .common)
             holdTimer = timer
+            onArm?()
             return
         }
 
@@ -275,8 +325,10 @@ final class HotkeyManager {
     }
 
     private func cancelHold() {
-        holdTimer?.invalidate()
+        guard let timer = holdTimer else { return }
+        timer.invalidate()
         holdTimer = nil
+        onDisarm?()
     }
 
     private func setActive(_ nowActive: Bool) {
@@ -293,12 +345,79 @@ final class HotkeyManager {
     }
 
     /// Forces the chord open in case a keyUp was lost (e.g. focus change mid-hold).
-    /// Called defensively when a dictation session ends.
+    /// Called defensively when a dictation session ends. Silent: no
+    /// `onTriggerUp`. Clearing every flag also stops the poller, so it cannot
+    /// fire a second, late UP for the same press.
     func resetChordState() {
         cancelHold()
         isModifierDown = false
         isTriggerKeyDown = false
         isActive = false
+    }
+
+    // MARK: - Hardware poller
+
+    /// Runs the poller exactly while some key is believed down or a hold is
+    /// pending; stops it otherwise. Idempotent.
+    private func updatePolling() {
+        let needed = isModifierDown || isTriggerKeyDown || isActive || holdTimer != nil
+        if needed, pollTimer == nil {
+            let timer = Timer(timeInterval: Self.hardwarePollInterval, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.reconcileWithHardware() }
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            pollTimer = timer
+        } else if !needed, let timer = pollTimer {
+            timer.invalidate()
+            pollTimer = nil
+        }
+    }
+
+    /// Compares what the tap believes with what the keyboard reports, and
+    /// replays any release the tap missed through `evaluate()` — the same
+    /// path as a real key-up, so a recording is transcribed, not dropped, and
+    /// a pending hold ends in `onDisarm`. `setActive`/`cancelHold` guard their
+    /// own edges, so a real key-up arriving later is a no-op (the flag is
+    /// already false and `handle` ignores it as a duplicate).
+    private func reconcileWithHardware() {
+        var released = false
+        if isModifierDown {
+            if Self.hardwareModifierHeld(trigger) {
+                modifierSeenHeld = true
+            } else if modifierSeenHeld {
+                Log.hotkey.warning("Modifier release missed by the event tap — synthesizing it")
+                isModifierDown = false
+                released = true
+            }
+        }
+        if isTriggerKeyDown, let code = trigger.triggerKeyCode {
+            if Self.hardwareKeyHeld(code) {
+                triggerKeySeenHeld = true
+            } else if triggerKeySeenHeld {
+                Log.hotkey.warning("Trigger key release missed by the event tap — synthesizing it")
+                isTriggerKeyDown = false
+                released = true
+            }
+        }
+        if released { evaluate() }
+    }
+
+    /// The two state tables a key can show up in: the session's combined view
+    /// and the raw HID one (upstream of every tap, so it still sees the chord
+    /// letter we swallow). Held in either counts as held — a false "held"
+    /// only delays recovery, a false "released" would cut a dictation short.
+    private static let stateSources: [CGEventSourceStateID] = [.combinedSessionState, .hidSystemState]
+
+    private static func hardwareModifierHeld(_ trigger: Trigger) -> Bool {
+        let code = CGKeyCode(trigger.modifierKeyCode)
+        return stateSources.contains {
+            CGEventSource.flagsState($0).contains(trigger.modifierFlag)
+                || CGEventSource.keyState($0, key: code)
+        }
+    }
+
+    private static func hardwareKeyHeld(_ keyCode: Int) -> Bool {
+        stateSources.contains { CGEventSource.keyState($0, key: CGKeyCode(keyCode)) }
     }
 }
 

@@ -1,0 +1,15 @@
+[
+ {"kind": "list", "said": "the new policy has two parts firstly everyone works from the office on tuesdays and secondly meetings end by four", "want": "The new policy has two parts:\n1. Everyone works from the office on Tuesdays.\n2. Meetings end by four."},
+ {"kind": "list", "said": "to apply for the visa first fill in the form second book an appointment third bring two photos and finally pay the fee at the counter", "want": "To apply for the visa:\n1. Fill in the form.\n2. Book an appointment.\n3. Bring two photos.\n4. Pay the fee at the counter."},
+ {"kind": "list", "said": "for dinner first we need to buy vegetables and second someone has to clean the kitchen", "want": "For dinner:\n1. We need to buy vegetables.\n2. Someone has to clean the kitchen."},
+ {"kind": "list-question", "said": "can you do three things for me first email the client second update the tracker and third book the meeting room", "want": "Can you do three things for me?\n1. Email the client.\n2. Update the tracker.\n3. Book the meeting room."},
+ {"kind": "list-correction", "said": "we need to order supplies first twelve no sorry fifteen boxes of paper and second three printer cartridges", "want": "We need to order supplies:\n1. Fifteen boxes of paper.\n2. Three printer cartridges."},
+ {"kind": "not-list", "said": "she was the first person to call me and the second person to leave", "want": "She was the first person to call me and the second person to leave."},
+ {"kind": "not-list", "said": "my first job was at a bank and my second job was at a school", "want": "My first job was at a bank, and my second job was at a school."},
+ {"kind": "not-list", "said": "number one on my list is sleep and number two is food", "want": "Number one on my list is sleep, and number two is food."},
+ {"kind": "short", "said": "first thing tomorrow call the dentist", "want": "First thing tomorrow, call the dentist."},
+ {"kind": "short", "said": "hey sam thanks for the invite i would love to come i will bring dessert see you saturday cheers", "want": "Hey Sam, thanks for the invite. I would love to come. I will bring dessert. See you Saturday. Cheers."},
+ {"kind": "paragraphs", "said": "the plumber came this morning and fixed the leak under the sink he said the pipes are old and we should replace them next year the bill was two hundred dollars in other news the school called about the trip on friday the kids need packed lunches and a signed form please remind me to sign it tonight", "want": "The plumber came this morning and fixed the leak under the sink. He said the pipes are old, and we should replace them next year. The bill was two hundred dollars.\n\nIn other news, the school called about the trip on Friday. The kids need packed lunches and a signed form. Please remind me to sign it tonight."},
+ {"kind": "command", "said": "hello new line how are you", "want": "Hello.\nHow are you?"},
+ {"kind": "command-not", "said": "the new line manager starts on monday", "want": "The new line manager starts on Monday."}
+]

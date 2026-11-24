@@ -96,11 +96,19 @@ final class AppState: ObservableObject, StatusInfoProvider {
     /// Presses shorter than this are treated as accidental taps.
     private static let minimumPressDuration: Duration = .milliseconds(120)
 
+    /// Hard cap on one recording. Past it the session stops as if the key was
+    /// released and the transcript is still delivered. A backstop for a release
+    /// nothing caught (the hotkey poller covers the usual cases), a forgotten
+    /// toggle-mode session, or a window RECORD left running.
+    private static let maxRecordingDuration: Duration = .seconds(5 * 60)
+
     // MARK: - Init
 
     init() {
         hotkeyManager.onTriggerDown = { [weak self] in self?.handleTriggerDown() }
         hotkeyManager.onTriggerUp = { [weak self] in self?.handleTriggerUp() }
+        hotkeyManager.onArm = { [weak self] in self?.armMicrophone() }
+        hotkeyManager.onDisarm = { [weak self] in self?.disarmMicrophone() }
         hotkeyManager.setTrigger(settings.hotkeyTrigger)
 
         // SwiftUI does not observe nested ObservableObjects, so a new
@@ -278,13 +286,13 @@ final class AppState: ObservableObject, StatusInfoProvider {
     /// being typed anywhere.
     func startFromWindow() {
         guard sessionTask == nil else { return }
-        SoundKit.play(.recordDown)
+        playStartCue()
         begin(from: .window)
     }
 
     func stopFromWindow() {
         guard sessionTask != nil else { return }
-        SoundKit.play(.stopDown)
+        playStopCue()
         guard state == .recording else { return }
         isShortPress = false
         signalRelease()
@@ -292,12 +300,79 @@ final class AppState: ObservableObject, StatusInfoProvider {
 
     // MARK: - Trigger handling
 
+    /// Fn went down: start the microphone now, so the words spoken during the
+    /// hold check and engine start-up are kept. Only when a recording could
+    /// actually begin — never around password fields or without permission.
+    ///
+    /// Not at the very instant of key-down: a Globe tap (input-source switch,
+    /// emoji picker) is usually over within `armDelay`, and opening the mic
+    /// for it would flash the privacy dot — and switch AirPods into
+    /// low-quality call mode — for a press that never dictates. Speech rarely
+    /// starts that soon after the press, so the delay costs nothing audible.
+    private func armMicrophone() {
+        armGeneration += 1
+        let generation = armGeneration
+        guard sessionTask == nil, enginePrepared,
+              permissionManager.state.allGranted,
+              !IsSecureEventInputEnabled() else { return }
+        Task { [weak self] in
+            try? await Task.sleep(for: Self.armDelay)
+            // Released (or disarmed for any other reason) meanwhile: never open the mic.
+            guard let self, self.armGeneration == generation, self.sessionTask == nil else { return }
+            // The token lets the engine drop this arm if a disarm sent after
+            // this point overtakes it on the way to the actor.
+            await self.engine.armMicrophone(token: generation)
+        }
+    }
+
+    /// The record click. The microphone may already be live and hear it, so
+    /// the engine is told when, and doesn't mistake it for speech.
+    private func playStartCue() {
+        let now = ContinuousClock.now
+        SoundKit.play(.recordDown)
+        Task { await engine.noteCue(at: now) }
+    }
+
+    /// The stop click, while the microphone is still live: noted like the
+    /// start click so it can't be mistaken for speech either.
+    private func playStopCue() {
+        let now = ContinuousClock.now
+        SoundKit.play(.stopDown)
+        Task { await engine.noteCue(at: now) }
+    }
+
+    private func disarmMicrophone() {
+        armGeneration += 1
+        let token = armGeneration
+        Task { await engine.disarmMicrophone(token: token) }
+    }
+
+    /// See `armMicrophone`. Below `HotkeyManager.holdDelay` (300 ms), so the
+    /// mic is live well before the hold is confirmed.
+    private static let armDelay: Duration = .milliseconds(120)
+    private var armGeneration = 0
+
+    /// When the recording cap last ended a session. In toggle mode the user
+    /// may tap to stop a moment after the cap already did; that tap must not
+    /// start a new recording into whatever app is in front.
+    private var cappedAt: ContinuousClock.Instant?
+    /// Set by the cap for the session in progress only.
+    private var sessionWasCapped = false
+    private static let tapAfterCapGrace: Duration = .seconds(3)
+
     private func handleTriggerDown() {
+        if settings.effectiveHotkeyMode == .toggle, sessionTask == nil,
+           let cappedAt, ContinuousClock.now - cappedAt < Self.tapAfterCapGrace {
+            Log.hotkey.info("Toggle tap ignored: the recording cap just stopped the session")
+            self.cappedAt = nil
+            disarmMicrophone()
+            return
+        }
         // Toggle mode: a second tap while recording stops the session.
         if settings.effectiveHotkeyMode == .toggle, sessionTask != nil {
             if state == .recording {
                 Log.hotkey.info("Toggle: second tap — stopping session")
-                SoundKit.play(.stopDown)
+                playStopCue()
                 isShortPress = false
                 signalRelease()
             } else {
@@ -319,6 +394,7 @@ final class AppState: ObservableObject, StatusInfoProvider {
         // no keystroke synthesis around password fields.
         if origin == .hotkey, IsSecureEventInputEnabled() {
             Log.hotkey.info("Trigger DOWN ignored: Secure Event Input active")
+            disarmMicrophone()
             return
         }
 
@@ -327,11 +403,13 @@ final class AppState: ObservableObject, StatusInfoProvider {
             let missing = permissionManager.state.missingBlockingNames.joined(separator: ", ")
             state = .unavailable("Permission missing: \(missing)")
             Log.hotkey.info("Trigger DOWN ignored: missing permissions (\(missing, privacy: .public))")
+            disarmMicrophone()
             return
         }
         guard permissionManager.state.microphoneGranted else {
             state = .unavailable("Microphone access is required")
             SoundKit.play(.error)
+            disarmMicrophone()
             return
         }
 
@@ -341,7 +419,7 @@ final class AppState: ObservableObject, StatusInfoProvider {
         isShortPress = false
         releasePending = false
 
-        if origin == .hotkey { SoundKit.play(.recordDown) }
+        if origin == .hotkey { playStartCue() }
 
         state = .recording
         startElapsedClock()
@@ -402,6 +480,14 @@ final class AppState: ObservableObject, StatusInfoProvider {
     private func runSession() async {
         let startedAt = Date()
         defer {
+            // No-op when startRecording claimed the capture; otherwise (engine
+            // not ready, error before recording) the microphone stops here.
+            disarmMicrophone()
+            // The grace for a stray toggle tap runs from when the capped
+            // session actually finished (transcription can take seconds);
+            // any other session ending clears it.
+            cappedAt = sessionWasCapped ? .now : nil
+            sessionWasCapped = false
             sessionTask = nil
             originApp = nil
             pressStartedAt = nil
@@ -455,6 +541,19 @@ final class AppState: ObservableObject, StatusInfoProvider {
                     if self?.origin == .hotkey { self?.hud.push(level: CGFloat(level)) }
                 }
             }
+
+            // Backstop: stop as if released once the cap is reached. Cancelled
+            // when this scope ends, and a no-op once the session left .recording.
+            let recordingCap = Task { [weak self] in
+                try? await Task.sleep(for: Self.maxRecordingDuration)
+                guard !Task.isCancelled, let self, self.state == .recording else { return }
+                Log.hotkey.warning("Recording reached the maximum length — stopping as if released")
+                self.sessionWasCapped = true
+                self.isShortPress = false
+                playStopCue()
+                self.signalRelease()
+            }
+            defer { recordingCap.cancel() }
 
             // Wait for the stop signal (or resolve instantly if it already came).
             if releasePending {

@@ -1,3 +1,4 @@
+import AppKit
 import CryptoKit
 import Foundation
 import whisper
@@ -76,12 +77,38 @@ final class WhisperEngine: @unchecked Sendable {
         Store.directory.appendingPathComponent("models", isDirectory: true).appendingPathComponent(model.file)
     }
 
-    init(model: Model) { self.model = model }
+    init(model: Model) {
+        self.model = model
+        // A model still loaded at exit crashes the process on the way out:
+        // ggml's Metal device is a static that asserts all its buffers are
+        // gone when it is destroyed (GGML_ASSERT rsets count == 0). Free it
+        // first, synchronously — termination does not wait for async work.
+        // Seen on every `--transcribe` run, and on quitting within the idle
+        // window after a Bangla dictation.
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: nil
+        ) { [weak self] _ in self?.freeNow() }
+    }
+
+    /// Frees the model before returning. A decode in progress is told to
+    /// stop first, so quitting waits for whisper to notice, not for the
+    /// whole transcription.
+    func freeNow() {
+        lock.withLock { inFlight.forEach { $0.set() } }
+        queue.sync {
+            idleUnload?.cancel()
+            guard let context else { return }
+            whisper_free(context)
+            self.context = nil
+        }
+    }
 
     private let queue = DispatchQueue(label: "com.youflow.whisper", qos: .userInitiated)
     private var context: OpaquePointer?         // queue-confined
     private var idleUnload: DispatchWorkItem?   // queue-confined
     private let lock = NSLock()
+    /// Abort flags of decodes queued or running, so quitting can stop them.
+    private var inFlight: [AbortFlag] = []
     private var preparing: Task<Void, Error>?
     private var installed = false
 
@@ -202,6 +229,8 @@ final class WhisperEngine: @unchecked Sendable {
     /// use (Apple already wrote the English) can't hold up the next one.
     func transcribe(_ samples: [Float]) async -> String {
         let abort = AbortFlag()
+        lock.withLock { inFlight.append(abort) }
+        defer { lock.withLock { inFlight.removeAll { $0 === abort } } }
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 queue.async { continuation.resume(returning: self.decode(samples, abort: abort, timed: true)) }

@@ -247,11 +247,36 @@ enum CorrectionEngine {
         assert(EnglishSpelling.apply(to: "please send the reprt.", apple: words([("Please", 0.9), ("send", 0.9), ("the", 0.9), ("report", 0.9)]))
                == "Please send the report.", "sentence punctuation lost")
 
-        // Silence gate: a short phrase in a long hold is speech; faint hiss is not.
+        // Apple's chunks: collided sentences get a space, punctuation stays attached.
+        for (parts, expected) in [
+            (["and create something else", "So, here I was"], "and create something else So, here I was"),
+            (["How can I detect that?", "Problem."], "How can I detect that? Problem."),
+            (["Hello", " there"], "Hello there"),
+            (["Yusha", "'s laptop", ", okay"], "Yusha's laptop, okay"),
+            (["send it", "."], "send it."),
+            (["I need to check that", "and then send it"], "I need to check that and then send it"),
+            (["The total was 5.", "10 more came later"], "The total was 5. 10 more came later"),
+            (["I need 1, 2,", "3 copies"], "I need 1, 2, 3 copies"),
+            (["room 12", "34"], "room 1234"),
+            (["send 3 files.", "Then call"], "send 3 files. Then call"),
+        ] {
+            let got = TranscriptAccumulator.join(parts)
+            assert(got == expected, "chunk join: \(parts) -> \(got)")
+        }
+
+        // Silence gate: a short word in a long hold is speech; faint hiss and
+        // the 120 ms start click on their own are not.
+        let gate = SpeechEngine.minimumAudibleSeconds
         var longHold = [Float](repeating: 0, count: 16_000 * 10)
-        for i in 0..<1600 { longHold[i] = 0.05 }
-        assert(SpeechEngine.loudestWindowRMS(longHold) > 0.0018, "short phrase in long hold read as silence")
-        assert(SpeechEngine.loudestWindowRMS([Float](repeating: 0.0005, count: 16_000)) < 0.0018, "hiss read as speech")
+        for i in 0..<6_400 { longHold[i + 40_000] = 0.05 * sin(Float(i) * 0.3) }           // 0.4 s word
+        assert(SpeechEngine.audibleSeconds(longHold) >= gate, "short word in long hold read as silence")
+        assert(SpeechEngine.audibleSeconds([Float](repeating: 0.0005, count: 16_000)) < gate, "hiss read as speech")
+        var click = [Float](repeating: 0, count: 16_000 * 2)
+        for i in 0..<1_920 { click[i + 1_500] = 0.3 * sin(Float(i) * 0.04) * exp(-Float(i) / 700) }  // 0.12 s burst
+        assert(SpeechEngine.audibleSeconds(click, ignoring: [1_200..<5_500]) < gate, "start click read as speech")
+        var quickYes = [Float](repeating: 0, count: 16_000)
+        for i in 0..<2_560 { quickYes[i + 8_000] = 0.05 * sin(Float(i) * 0.3) }           // 0.16 s "হ্যাঁ"
+        assert(SpeechEngine.audibleSeconds(quickYes, ignoring: [1_200..<5_500]) >= gate, "quick word read as silence")
 
         // Banglish: Bangla script romanized the way people type it; English untouched.
         for (input, expected) in [
@@ -260,12 +285,21 @@ enum CorrectionEngine {
             ("ধন্যবাদ ভাই", "dhonnobad bhai"),
             ("This project টা আজকে শেষ করতে হবে, okay?", "This project ta ajke shesh korte hobe, okay?"),
             ("আমি একটু পরে কল করবো।", "ami ektu pore kol korbo."),
+            ("আমি যাব তারপর দিব", "ami jabo taropor dibo"),
+            ("করব বলব খাব পাব", "korbo bolbo khabo pabo"),
+            ("ভাব সব হিসাব জবাব নবাব শিব জীব গজব তলব দেব", "bhab shob hishab jobab nobab shib jib gojob tolob deb"),
+            ("সামনে সামনের জীবনে", "shamne shamner jibone"),
             ("কেন হবে না", "keno hobe na"),
             ("১২৩ টাকা", "123 taka"),
             ("meeting-এ যাচ্ছি", "meeting-e jachchi"),
             ("সময় নেই, আমি আসবো", "shomoy nei, ami ashbo"),
             ("স্কুলের রাস্তা", "skuler rasta"),
             ("পরীক্ষা", "porikha"),
+            ("ব্যবসা নিয়ে ব্যস্ত ব্যক্তি", "bebsha niye besto bekti"),
+            ("ব্যবহার ব্যবস্থা ব্যথা", "bebohar bebostha betha"),
+            ("ব্যাংকের ব্যাগ", "bangker bag"),
+            ("জীবনে জীবনের শহরে সময়ে", "jibone jiboner shohore shomoye"),
+            ("লোকদের বলতে হবে কালকের কথা", "lokder bolte hobe kalker kotha"),
             ("Please send the report.", "Please send the report."),
         ] {
             let got = BanglaRomanizer.apply(to: input)
@@ -540,6 +574,9 @@ enum BanglaRomanizer {
     private static let exceptions: [String: String] = [
         "কেন": "keno", "কত": "koto", "এত": "eto", "যত": "joto", "তত": "toto",
         "মত": "moto", "বড়": "boro", "ছোট": "choto", "ভাল": "bhalo", "হ্যাঁ": "ha",
+        // The -e / -er suffix rule keeps the stem's vowel (জীবনে "jibone");
+        // these stems drop it in speech.
+        "সামনে": "shamne", "সামনের": "shamner", "কেমনে": "kemne", "আপনে": "apne",
     ]
 
     private enum Vowel { case inherent, none, sign(String) }
@@ -577,10 +614,27 @@ enum BanglaRomanizer {
         return out
     }
 
+    /// The first-person future ("I'll go") is spoken -bo, but Whisper often
+    /// writes it without its ো: যাব, দিব, করব. Read literally those come out
+    /// "jab", "dib", "korob"; spelled with the ো they come out right. A list,
+    /// not a shape rule: the same shapes are nouns and names that really end
+    /// in a silent b (শিব, জীব, গজব, ভাব, and দেব, which is also "Dev").
+    private static let futureStems: Set<String> = [
+        "যাব", "দিব", "নিব", "নেব", "করব", "বলব", "খাব", "পাব", "দেখব", "শুনব", "আসব",
+        "থাকব", "লিখব", "পড়ব", "রাখব", "ধরব", "ভাবব", "বসব", "উঠব", "খেলব", "কিনব",
+        "বুঝব", "জানব", "চিনব", "ফেলব", "পারব", "শিখব", "বানাব", "পাঠাব", "দেখাব",
+        "চালাব", "ঘুমাব", "হাঁটব", "ছাড়ব", "মারব", "চাইব", "খুঁজব", "নামব", "হাসব",
+    ]
+
+    private static func futureWithoutO(_ word: String) -> String? {
+        futureStems.contains(word) ? word + "\u{09CB}" : nil
+    }
+
     private static func isBangla(_ s: Unicode.Scalar) -> Bool { (0x0980...0x09FF).contains(s.value) }
 
     private static func romanize(word: String) -> String {
         if let known = exceptions[word] { return known }
+        if let future = futureWithoutO(word) { return romanize(word: future) }
 
         // Pass 1: letters into units.
         var units: [Unit] = []
@@ -599,7 +653,15 @@ enum BanglaRomanizer {
                         afterVirama = false
                         continue
                     case "\u{09AF}":                                     // ya-phala
-                        let nextIsAa = i + 1 < scalars.count && scalars[i + 1] == "\u{09BE}"
+                        let next = i + 1 < scalars.count ? scalars[i + 1] : nil
+                        // Word-initial with no vowel sign it is spoken "e" (æ):
+                        // ব্যবসা "bebsha", ব্যস্ত "besto".
+                        if clusterStartsWord, next.map({ vowelSigns[$0] == nil && $0 != virama }) ?? true {
+                            units.append(.consonant(sound: "", vowel: .sign("e"), joined: true))
+                            afterVirama = false
+                            continue
+                        }
+                        let nextIsAa = next == "\u{09BE}"
                         sound = clusterStartsWord ? (nextIsAa ? "" : "y") : (prev.count == 1 ? prev : "")
                     case "\u{09AC}":                                     // ba-phala
                         sound = clusterStartsWord ? "" : (prev.count == 1 ? prev : "")
@@ -647,12 +709,33 @@ enum BanglaRomanizer {
                 out += sound; previousVoiced = false
             case .consonant(let sound, .inherent, let joined):
                 let isLast = position == letterIndices.count - 1
-                let nextHasSign: Bool = {
-                    guard !isLast, case .consonant(_, .sign, false) = units[letterIndices[position + 1]] else { return false }
-                    return true
+                let next: (sound: String, sign: String)? = {
+                    guard !isLast, case .consonant(let s, .sign(let v), false) = units[letterIndices[position + 1]] else { return nil }
+                    return (s, v)
+                }()
+                let nextHasSign = next != nil
+                // Dropping the vowel would fuse with a following h into a
+                // digraph that reads as another letter: ব্যবহার "bebohar", not "bebhar".
+                let wouldFormDigraph = ["k", "g", "j", "t", "d", "p", "b", "s"].contains(sound)
+                    && next?.sound.hasPrefix("h") == true
+                // A vowel suffix -e / -er on a consonant-final stem keeps the
+                // stem's last vowel: জীবনে "jibone", শহরে "shohore", সময়ের "shomoyer".
+                // Only after n/r/m/y/j (and d for bare -e): -te, -le, -ke, -be,
+                // -che, -der are consonant suffixes on a bare stem ("bolte",
+                // "korle", "kalke", "korbe", "lokder").
+                let vowelSuffixFollows: Bool = {
+                    guard let next, next.sign == "e", ["n", "r", "m", "y", "j", "d"].contains(next.sound) else { return false }
+                    let rest = letterIndices.count - position - 2
+                    if rest == 0 { return true }
+                    guard rest == 1 else { return false }
+                    switch units[letterIndices[position + 2]] {
+                    case .consonant("r", .inherent, _): return next.sound != "d"   // -er, but not plural -der
+                    case .vowel: return true                                       // emphatic -eo / -ei
+                    default: return false
+                    }
                 }()
                 let voiced: Bool
-                if modifierFollows || letterIndices.count == 1 {
+                if modifierFollows || letterIndices.count == 1 || wouldFormDigraph || vowelSuffixFollows {
                     voiced = true
                 } else if isLast {
                     voiced = joined                     // "shob-do", "jach-cho"; else silent
