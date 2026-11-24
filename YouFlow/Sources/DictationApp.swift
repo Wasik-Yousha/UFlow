@@ -394,7 +394,7 @@ enum CleanupReplay {
         }
     }
 }
-        }
+
 /// `UFlow --llm <e2b|e4b|e12b> "<text>"… [--wav <file.wav>]` loads that
 /// clean-up model (downloading it first if it is missing), runs each text
 /// through one generation with a trivial prompt, and prints the reply, load
