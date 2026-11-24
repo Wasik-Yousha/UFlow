@@ -56,9 +56,10 @@ final class TranscriptAccumulator: @unchecked Sendable {
     private var confidenceSum = 0.0
     private var confidenceWeight = 0
     private var finalizedWords: [AppleWord] = []
+    private var finalizedSpans: [AppleSpan] = []
 
     func append(_ rawText: String, isFinal: Bool, confidence: (sum: Double, weight: Int) = (0, 0),
-                words: [AppleWord] = []) {
+                words: [AppleWord] = [], spans: [AppleSpan] = []) {
         let text = String(rawText)
         lock.lock()
         defer { lock.unlock() }
@@ -68,6 +69,7 @@ final class TranscriptAccumulator: @unchecked Sendable {
             confidenceSum += confidence.sum
             confidenceWeight += confidence.weight
             finalizedWords += words
+            finalizedSpans += spans
         } else {
             volatileTail = text
         }
@@ -81,6 +83,9 @@ final class TranscriptAccumulator: @unchecked Sendable {
 
     /// Finalized words with the model's confidence in each.
     func words() -> [AppleWord] { lock.withLock { finalizedWords } }
+
+    /// Seconds into the recording where Apple heard its words.
+    func spans() -> [AppleSpan] { lock.withLock { finalizedSpans } }
 
     /// Assembled transcript from finalized results only.
     func finalText() -> String {
@@ -131,6 +136,12 @@ final class TranscriptAccumulator: @unchecked Sendable {
     }
 }
 
+/// A stretch of the recording and how many words Apple wrote for it.
+struct AppleSpan: Sendable {
+    let time: ClosedRange<Double>
+    let words: Int
+}
+
 /// One word of Apple's transcript and how sure its model was of it.
 struct AppleWord: Sendable, Equatable {
     let text: String
@@ -142,6 +153,8 @@ struct AppleTranscript: Sendable {
     var text = ""
     var confidence: Double?
     var words: [AppleWord] = []
+    /// Seconds into the recording that Apple's words cover.
+    var spans: [AppleSpan] = []
 }
 
 // MARK: - Errors
@@ -557,7 +570,7 @@ actor SpeechEngine {
         return SpeechTranscriber(locale: locale,
                                  transcriptionOptions: preset.transcriptionOptions,
                                  reportingOptions: preset.reportingOptions,
-                                 attributeOptions: preset.attributeOptions.union([.transcriptionConfidence]))
+                                 attributeOptions: preset.attributeOptions.union([.transcriptionConfidence, .audioTimeRange]))
     }
 
     /// Builds a fresh module set for a new session. Cheap: the underlying
@@ -713,13 +726,40 @@ actor SpeechEngine {
         let cue = cueRanges(in: session.capture)
         cues = []
         let whisperTask = Task { await self.transcribeWhisper(samples, mode: mode, ignoring: cue) }
-        return await pick(english: await finishApple(session), whisper: whisperTask, mode: mode)
+        return await pick(english: await finishApple(session), whisper: whisperTask, samples: samples, mode: mode)
     }
 
     /// Apple's text when it is sure the speech was English, else Whisper's.
-    private func pick(english: AppleTranscript, whisper: Task<String, Never>, mode: SpeechLanguage) async -> String {
+    private func pick(english: AppleTranscript, whisper: Task<String, Never>, samples: [Float],
+                      mode: SpeechLanguage) async -> String {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["UFLOW_TRACE"] != nil {
+            let words = english.words.map { "\($0.text)@\(String(format: "%.2f", $0.confidence))" }.joined(separator: " ")
+            let unheard = Self.unheardSpeechSeconds(samples, spans: english.spans)
+            FileHandle.standardError.write(Data("WORDS\tmean=\(english.confidence.map { String(format: "%.3f", $0) } ?? "-")\tunheard=\(String(format: "%.2f", unheard))\t\(words)\n".utf8))
+        }
+        #endif
         if let confidence = english.confidence, confidence >= Self.englishConfidence, !english.text.isEmpty {
-            // Stop the now-pointless decode, or the next dictation queues
+            // Apple is sure — about the words it understood. Bangla inside an
+            // English sentence it silently drops ("I will send the report
+            // কালকে সকালে okay" → "I will send the report. Okay.") or turns
+            // into English ("ভাই" → "Bye", "কেমন আছো" → "Camo nacho"), and
+            // the remaining English words keep its confidence high. So Whisper
+            // gets a short wait to say whether it heard Bangla too; if it did,
+            // the sentence is mixed and goes the mixed route (Whisper's words,
+            // Apple's English spellings).
+            // Only when there are signs of it, so pure English stays instant:
+            // speech Apple wrote no word for (dropped Bangla), or a doubtful
+            // word before the last (Bangla turned into English; the last word
+            // of a sentence is often doubtful anyway).
+            let doubtful = english.words.dropLast().contains { $0.confidence < Self.doubtfulWord }
+                || Self.unheardSpeechSeconds(samples, spans: english.spans) >= Self.unheardSpeech
+            if doubtful, let heard = await Self.value(of: whisper, within: Self.mixedCheckWait),
+               Self.banglaWordCount(heard) >= 2 {
+                Log.speech.info("Apple sure (\(confidence, privacy: .public)) but Whisper heard Bangla too — mixed sentence")
+                return route(heard: heard, english: english, mode: mode)
+            }
+            // Stop a decode that ran over, or the next dictation queues
             // behind it (measured: a Bangla clip after three English ones
             // waited 12.7 s instead of ~1.4 s).
             whisper.cancel()
@@ -739,6 +779,71 @@ actor SpeechEngine {
         }
         Log.speech.info("Routed to Whisper (Apple confidence \(english.confidence ?? -1, privacy: .public), \(english.words.count, privacy: .public) words)")
         return route(heard: await whisper.value, english: english, mode: mode)
+    }
+
+    /// A word Apple is less sure of than this, before the sentence's last
+    /// word, suggests it is English Apple made up for Bangla ("Bye" for ভাই
+    /// 0.64, "Camo" for কেমন 0.67). Pure English mid-sentence words: ≥ 0.69.
+    private static let doubtfulWord = 0.70
+
+    /// This much speech with no Apple word over it means Apple dropped
+    /// something it couldn't understand — usually Bangla.
+    private static let unheardSpeech = 0.35
+
+    /// Seconds of clearly spoken audio (16 kHz samples) that no Apple word
+    /// covers. Words are given a little slack on both sides, since Apple's
+    /// timings are tight and speech trails off.
+    static func unheardSpeechSeconds(_ samples: [Float], spans: [AppleSpan],
+                                     rate: Double = WhisperEngine.sampleRate) -> Double {
+        guard !spans.isEmpty, !samples.isEmpty else { return 0 }
+        let window = Int(rate * 0.02)
+        let slack = 0.2
+        let covered = spans.map { ($0.time.lowerBound - slack)...($0.time.upperBound + slack) }
+        // A span far longer than its words take to say hides speech Apple
+        // skipped: "report. Okay." stretched over "কালকে সকালে" in between.
+        let stretched = spans.reduce(0.0) { total, span in
+            let length = span.time.upperBound - span.time.lowerBound
+            return total + max(0, length - (Self.secondsPerWord * Double(max(span.words, 1)) + 0.3))
+        }
+        var unheard = 0
+        for start in stride(from: 0, to: samples.count, by: window) {
+            let chunk = samples[start..<min(start + window, samples.count)]
+            let rms = (chunk.reduce(0) { $0 + $1 * $1 } / Float(chunk.count)).squareRoot()
+            guard rms >= speechRMS else { continue }
+            let t = (Double(start) + Double(window) / 2) / rate
+            if !covered.contains(where: { $0.contains(t) }) { unheard += 1 }
+        }
+        return Double(unheard * window) / rate + stretched
+    }
+
+    /// Generous time for one spoken English word (typical: 0.25–0.4 s).
+    private static let secondsPerWord = 0.6
+
+    /// Louder than this is speech rather than room noise (about -40 dBFS).
+    private static let speechRMS: Float = 0.01
+
+    /// How long an English-confident dictation waits for Whisper's opinion.
+    /// Whisper takes ~0.4–0.9 s on a sentence (M4 Pro); slower Macs that run
+    /// over simply get Apple's text, as before.
+    private static let mixedCheckWait: Duration = .milliseconds(2500)
+
+    /// Words in Bangla script. Two or more means Whisper really heard Bangla;
+    /// a single one can be an English word it spelled phonetically.
+    static func banglaWordCount(_ text: String) -> Int {
+        text.split(whereSeparator: \.isWhitespace).filter { word in
+            word.unicodeScalars.contains { (0x0980...0x09FF).contains($0.value) }
+        }.count
+    }
+
+    /// The task's value, or nil if it isn't done within `limit`.
+    static func value(of task: Task<String, Never>, within limit: Duration) async -> String? {
+        await withTaskGroup(of: String?.self) { group in
+            group.addTask { await task.value }
+            group.addTask { try? await Task.sleep(for: limit); return nil }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
     }
 
     /// The bar for 1–3 word replies that are all real English words.
@@ -888,7 +993,7 @@ actor SpeechEngine {
         activeSession = nil
         Log.speech.info("Recording stopped; transcript collected (\(text.isEmpty ? "empty" : "non-empty", privacy: .public))")
         return AppleTranscript(text: text, confidence: session.accumulator.meanConfidence(),
-                               words: session.accumulator.words())
+                               words: session.accumulator.words(), spans: session.accumulator.spans())
     }
 
     /// Cancels the active session without producing a transcript. Used for
@@ -1050,7 +1155,13 @@ actor SpeechEngine {
             for try await result in sequence {
                 var confidence = (sum: 0.0, weight: 0)
                 var words: [AppleWord] = []
+                var spans: [AppleSpan] = []
                 for run in result.text.runs {
+                    if let range = run.audioTimeRange, range.start.isNumeric, range.end.isNumeric,
+                       range.end.seconds >= range.start.seconds {
+                        let count = String(result.text[run.range].characters).split(whereSeparator: \.isWhitespace).count
+                        spans.append(AppleSpan(time: range.start.seconds...range.end.seconds, words: count))
+                    }
                     guard let value = run.transcriptionConfidence else { continue }
                     let text = String(result.text[run.range].characters)
                     let letters = text.filter { !$0.isWhitespace }.count
@@ -1059,7 +1170,8 @@ actor SpeechEngine {
                     words += text.split(whereSeparator: \.isWhitespace).map { AppleWord(text: String($0), confidence: value) }
                 }
                 accumulator.append(String(result.text.characters), isFinal: result.isFinal,
-                                   confidence: confidence, words: words)
+                                   confidence: confidence, words: words,
+                                   spans: spans)
             }
         } catch is CancellationError {
             // Expected on cancellation paths.
@@ -1333,7 +1445,7 @@ extension SpeechEngine {
         guard mode.usesEnglishCompanion, resolvedLocale != nil else {
             return await finish(route(heard: await whisperTask.value, english: AppleTranscript(), mode: mode), mode: mode)
         }
-        return await finish(await pick(english: try await appleTranscript(of: url), whisper: whisperTask, mode: mode), mode: mode)
+        return await finish(await pick(english: try await appleTranscript(of: url), whisper: whisperTask, samples: samples, mode: mode), mode: mode)
     }
 
     private func appleTranscript(of url: URL) async throws -> AppleTranscript {
@@ -1350,7 +1462,7 @@ extension SpeechEngine {
         try await analyzer.start(inputAudioFile: AVAudioFile(forReading: url), finishAfterFile: true)
         await consumer.value
         return AppleTranscript(text: accumulator.finalText(), confidence: accumulator.meanConfidence(),
-                               words: accumulator.words())
+                               words: accumulator.words(), spans: accumulator.spans())
     }
 }
 #endif

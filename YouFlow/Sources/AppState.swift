@@ -157,11 +157,11 @@ final class AppState: ObservableObject, StatusInfoProvider {
         cleanup.objectWillChange
             .sink { [weak self] in self?.objectWillChange.send() }
             .store(in: &cancellables)
-        settings.$cleanupEnabled.combineLatest(cleanup.$phase)
-            .sink { [weak self] enabled, phase in
+        settings.$cleanupEnabled.combineLatest(cleanup.$active)
+            .sink { [weak self] enabled, active in
                 guard let self else { return }
-                let cleaner = enabled && phase == .ready ? TextCleaner(llm: self.cleanup.llm) : nil
-                if cleaner == nil, phase == .ready { self.cleanup.llm.unload() }
+                let cleaner = enabled ? active.map { TextCleaner(llm: $0) } : nil
+                if cleaner == nil { active?.unload() }
                 Task { await self.engine.setCleaner(cleaner) }
             }
             .store(in: &cancellables)

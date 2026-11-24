@@ -73,12 +73,39 @@ final class CleanupController: ObservableObject {
     @Published private(set) var phase: Phase
     private var download: Task<Void, Never>?
 
+    /// The model clean-up actually runs on: this Mac's own model when it is
+    /// installed, otherwise the largest smaller one already on disk, so a
+    /// 24 GB Mac still cleans up with E4B while its 12B downloads. Never a
+    /// model above this Mac's tier. Nil when none is installed.
+    @Published private(set) var active: LocalLLM?
+
     init() {
         llm = LocalLLM(model: model)
         phase = model.isDownloaded ? .ready : .notDownloaded
+        refresh()
     }
 
-    var isReady: Bool { phase == .ready }
+    /// Clean-up can run (some suitable model is installed).
+    var isReady: Bool { active != nil }
+
+    /// Re-reads what is on disk. Cheap (file sizes); called at every
+    /// dictation, so a download finished elsewhere is picked up at once.
+    func refresh() {
+        if model.isDownloaded, case .notDownloaded = phase { phase = .ready }
+        let best = CleanupModel.allCases
+            .filter { $0.bytes <= model.bytes && $0.isDownloaded }
+            .max { $0.bytes < $1.bytes }
+        guard best != active?.model else { return }
+        active?.unload()
+        active = best.map { $0 == model ? llm : LocalLLM(model: $0) }
+        if let best { Log.app.info("Clean-up uses \(best.displayName, privacy: .public)") }
+    }
+
+    /// Shown in Settings when a smaller model stands in for this Mac's own.
+    var standIn: CleanupModel? {
+        guard let active, active.model != model else { return nil }
+        return active.model
+    }
 
     /// Human-readable size of the download, e.g. "2.8 GB".
     var sizeText: String {
@@ -102,6 +129,7 @@ final class CleanupController: ObservableObject {
                     }
                 }
                 self?.phase = .ready
+                self?.refresh()
                 Log.app.info("Clean-up model installed")
             } catch is CancellationError {
                 self?.phase = .notDownloaded
@@ -121,13 +149,15 @@ final class CleanupController: ObservableObject {
         llm.unload()
         try? llm.delete()
         phase = .notDownloaded
+        refresh()
     }
 
     /// Load while the user is still talking, so the release doesn't wait.
     func warmUp() {
         // Under critical memory pressure clean-up is skipped anyway; loading
         // gigabytes into a starved Mac would only make it worse.
-        guard phase == .ready, !llm.shouldSkip else { return }
-        llm.preload()
+        refresh()
+        guard let active, !active.shouldSkip else { return }
+        active.preload()
     }
 }

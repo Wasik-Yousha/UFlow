@@ -159,7 +159,7 @@
    "said": "hello new line how are you",
    "want": "Hello.\nHow are you?",
    "raw": "Hello, new line, how are you?",
-   "flat": "Hello, new line, how are you.",
+   "flat": "Hello, new line, how are you?",
    "layout_raw": null,
    "layout_note": "spoken command",
    "final": "Hello.\nHow are you?",

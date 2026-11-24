@@ -183,6 +183,11 @@ private struct CleanupSection: View {
                 LabeledContent("Status") {
                     Button("Download") { cleanup.startDownload() }
                 }
+                if let standIn = cleanup.standIn {
+                    Text("Using \(standIn.displayName), already on this Mac, until this one is downloaded.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
             case .downloading(let fraction):
                 LabeledContent("Downloading") {
                     HStack(spacing: 8) {

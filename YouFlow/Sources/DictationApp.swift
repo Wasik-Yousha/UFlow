@@ -336,6 +336,13 @@ enum FileTranscription {
         Task {
             let engine = SpeechEngine()
             if let mode = args.first.flatMap(SpeechLanguage.init(rawValue:)) { await engine.setLanguage(mode) }
+            // Same clean-up the app would use (CleanupController picks the
+            // best installed model for this Mac), unless UFLOW_CLEANUP=off.
+            if ProcessInfo.processInfo.environment["UFLOW_CLEANUP"] != "off",
+               let active = CleanupController().active {
+                await engine.setCleaner(TextCleaner(llm: active))
+                _ = await active.loadNow()
+            }
             do {
                 try await engine.prepare()
                 for path in args.dropFirst() {
