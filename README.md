@@ -13,13 +13,49 @@ Hold Fn,   talk,   let go to STOP. The text lands where your cursor was, instant
 
 **Fast.** The model runs on your Mac, not on somebody's GPU in Virginia. English is transcribed while you're still talking, so the text is already waiting when you stop. No upload, no queue, no spinner.
 
-**[Download UFlow 1.2](https://github.com/Wasik-Yousha/UFlow/releases/latest)** · macOS 26+ · Apple Silicon (M1 and later) · your voice never leaves the machine
+**[Download UFlow 1.4](https://github.com/Wasik-Yousha/UFlow/releases/latest)** · macOS 26+ · Apple Silicon (M1 and later) · your voice never leaves the machine
 
 Install in one line — paste into Terminal:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Wasik-Yousha/UFlow/main/scripts/install.sh | bash
 ```
+
+## New in 1.4: it cleans up after you
+
+**Say it the way you'd say it.** UFlow now removes the stumbles and keeps the rest exactly as you said it:
+
+| You say | UFlow types |
+|:--|:--|
+| I think, I think we should wait until the client replies | I think we should wait until the client replies. |
+| Let's meet at five, no sorry, at six | Let's meet at 6. |
+| There are three steps. First, download the app. Second, grant the permissions. Third, hold Fn and speak. | There are 3 steps:<br>1. Download the app.<br>2. Grant the permissions.<br>3. Hold the Fn key and speak. |
+| ami ami bolte chachchilam je mane ami kalke ashbo na | ami bolte chachchilam je, mane ami kalke ashbo na. |
+| Hey, how are you, kemon acho | Hey, how are you? kemon acho? |
+
+- **It never rewrites you.** A small language model running on your Mac suggests the edit, and UFlow checks every change before typing it. Words can only be removed when they're provably a slip (said twice, or corrected with "no wait", "sorry", "মানে", "না না"…). Punctuation and capitals can be added. Anything else the model changed is put back. On our 97-case test set: zero wrong outputs.
+- **Fast.** A clean English sentence is typed as soon as you let go, because the model only runs when there is something to fix.
+- **Pick your model in Settings → Clean-up**, one click to download, matched to your Mac:
+
+  | Your Mac | Model | Download |
+  |:--|:--|:--|
+  | 8 GB | Gemma 4 E2B | 2.8 GB |
+  | 16 GB | Gemma 4 E4B | 4.6 GB |
+  | 18 GB and up | E4B, or 12B (best for Bangla, slower) | 4.6 / 7.2 GB |
+
+  It loads while you talk, unloads when idle, and steps aside when your Mac is short on memory.
+
+**Bangla in the middle of English stays Bangla.** "I will send the report kalke shokale, okay" no longer loses the Bangla, and an English word inside a Bangla sentence ("ajke client er shathe kotha hoyeche") keeps its English spelling.
+
+**Also new**
+- **Your first words are kept.** The mic now starts the moment you press Fn.
+- **⌃⌥V pastes your last dictation again**, for when an app swallowed the paste.
+- **Learn from my corrections** (off by default): fix a word UFlow misheard right after dictating, and it suggests a dictionary entry.
+- **Fewer surprises:**
+  - Pasting works in Slack, VS Code and browsers, and on Dvorak.
+  - A recording survives AirPods connecting mid-sentence.
+  - A stuck Fn key stops itself.
+  - Pressing Fn and saying nothing types nothing.
 
 ## 🇧🇩 New in 1.2: UFlow speaks Bangla
 
@@ -134,7 +170,7 @@ Two things happen after that no agent can do on your behalf, because they're OS 
 
 Once granted, UFlow runs as a background menu-bar app with no Dock icon, and **hold `Fn` to talk** is the default hotkey — nothing else to set up.
 
-If you'd rather use the download button: grab the `.dmg` from [Download UFlow 1.2](https://github.com/Wasik-Yousha/UFlow/releases/latest) , drag UFlow to Applications, try to open it, get refused, Click Done.
+If you'd rather use the download button: grab the `.dmg` from [Download UFlow 1.4](https://github.com/Wasik-Yousha/UFlow/releases/latest) , drag UFlow to Applications, try to open it, get refused, Click Done.
 
 ⚠️ Not "Move to Trash" — Apple styles the destructive button green and makes it the visually obvious one.
 
@@ -162,7 +198,7 @@ cd ~/Downloads
 shasum -a 256 -c <(curl -fsSL https://github.com/Wasik-Yousha/UFlow/releases/latest/download/SHA256SUMS)
 ```
 
-`UFlow-1.2.dmg: OK` means the file you have is byte-for-byte the one that was built here.
+`UFlow-1.4.dmg: OK` means the file you have is byte-for-byte the one that was built here.
 It confirms the download arrived intact — it is not a signature, and it is not a substitute
 for notarization. If it ever says `FAILED`, don't install it.
 
