@@ -87,6 +87,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             FileTranscription.run(Array(CommandLine.arguments[(flag + 1)...]))
             return
         }
+        if let flag = CommandLine.arguments.firstIndex(of: "--cleanup-replay") {
+            let ok = CleanupReplay.run(Array(CommandLine.arguments[(flag + 1)...]))
+            exit(ok ? 0 : 1)
+        }
+        if CommandLine.arguments.contains("--cleanup-prompts") {
+            CleanupReplay.dumpPrompts()
+            exit(0)
+        }
         #endif
 
         let state = AppState.shared
@@ -313,6 +321,72 @@ enum FileTranscription {
                 print("ERROR \(error.localizedDescription)")
             }
             NSApp.terminate(nil)
+        }
+    }
+}
+#endif
+
+#if DEBUG
+/// `UFlow --cleanup-replay tools/cleanup-eval/recorded/*.json` replays every
+/// recorded row (the model's raw pass-1 and pass-2 outputs) through the Swift
+/// clean-up guard and compares the result byte for byte with what guard.py
+/// produced (`final`, and `flat` for the pass-1 text). Exits 1 on a mismatch.
+///
+/// `UFlow --cleanup-prompts` prints the prompts as JSON, for comparison with guard.py.
+enum CleanupReplay {
+    static func run(_ paths: [String]) -> Bool {
+        var total = 0, matched = 0
+        func same(_ a: String, _ b: String) -> Bool { a.utf8.elementsEqual(b.utf8) }
+        for path in paths {
+            guard let data = FileManager.default.contents(atPath: path),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: [[String: Any]]] else {
+                print("ERROR cannot read \(path)")
+                return false
+            }
+            for model in json.keys.sorted() {
+                for row in json[model] ?? [] {
+                    total += 1
+                    guard let said = row["said"] as? String, let raw = row["raw"] as? String,
+                          let final = row["final"] as? String else {
+                        print("ERROR malformed row in \(path) [\(model)]")
+                        continue
+                    }
+                    let layoutRaw = row["layout_raw"] as? String
+                    let got = CleanupGuard.finalize(spoken: said, cleanRaw: raw, layoutRaw: layoutRaw)
+                    let flat = CleanupGuard.flat(spoken: said, cleanRaw: raw)
+                    let expectedFlat = row["flat"] as? String ?? flat
+                    let wantsLayout = CleanupGuard.layoutRequest(spoken: said, cleanRaw: raw) != nil
+                    if same(got, final) && same(flat, expectedFlat) && wantsLayout == (layoutRaw != nil) {
+                        matched += 1
+                        continue
+                    }
+                    print("MISMATCH \((path as NSString).lastPathComponent) [\(model)]")
+                    print("  said:   \(said.debugDescription)")
+                    print("  python: \(final.debugDescription)")
+                    print("  swift:  \(got.debugDescription)")
+                    if !same(flat, expectedFlat) {
+                        print("  flat python: \(expectedFlat.debugDescription)")
+                        print("  flat swift:  \(flat.debugDescription)")
+                    }
+                    if wantsLayout != (layoutRaw != nil) { print("  layout gate differs (swift: \(wantsLayout))") }
+                }
+            }
+        }
+        print("\(matched)/\(total) match")
+        fflush(stdout)
+        return total > 0 && matched == total
+    }
+
+    static func dumpPrompts() {
+        let object: [String: Any] = [
+            "SYSTEM": CleanupPrompts.system,
+            "SHOTS": CleanupPrompts.shots.map { [$0.user, $0.assistant] },
+            "LAYOUT_SYSTEM": CleanupPrompts.layoutSystem,
+            "LAYOUT_SHOTS": CleanupPrompts.layoutShots.map { [$0.user, $0.assistant] },
+        ]
+        if let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) {
+            FileHandle.standardOutput.write(data)
+            print()
         }
     }
 }

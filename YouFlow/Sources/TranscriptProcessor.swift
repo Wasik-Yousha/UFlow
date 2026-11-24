@@ -351,6 +351,38 @@ enum CorrectionEngine {
         // A one-word dictation has nothing to anchor it.
         assert(learned("Vercell", "Vercel", "Vercell").isEmpty, "learned from an unanchored word")
 
+        // Clean-up guard: the model suggests, the guard decides (full parity: --cleanup-replay).
+        for (said, model, expected) in [
+            // a word the model changed (here: transliterated) is reverted to the spoken word
+            ("আমার urgent কাজ আছে", "আমার अर्जেন্ট কাজ আছে।", "আমার urgent কাজ আছে।"),
+            // the name after শোনো is never deleted
+            ("শোনো রাফি আজকে মিটিং আছে", "শোনো, আজকে মিটিং আছে।", "শোনো, রাফি আজকে মিটিং আছে।"),
+            // "না না" is emphasis, not a stutter
+            ("না না আমি রাগ করিনি", "আমি রাগ করিনি।", "না না আমি রাগ করিনি।"),
+            // a real stutter and a proven self-correction are removed
+            ("সে সে আজকে আসবে না", "সে আজকে আসবে না।", "সে আজকে আসবে না।"),
+            ("call him at three no wait at four", "Call him at four.", "Call him at four."),
+        ] {
+            let got = CleanupGuard.finalize(spoken: said, cleanRaw: model, layoutRaw: nil)
+            assert(got == expected, "cleanup guard: \(said) / \(model) -> \(got)")
+        }
+        // `?` without a question cue becomes । or .; real questions keep it.
+        for (input, expected) in [
+            ("আমি কালকে যাবো?", "আমি কালকে যাবো।"),
+            ("I will send it?", "I will send it."),
+            ("তুমি কি কালকে আসবে?", "তুমি কি কালকে আসবে?"),
+            ("Can you send it?", "Can you send it?"),
+            ("It works, right?", "It works, right?"),
+            ("Done।", "Done."),
+        ] {
+            let got = CleanupGuard.fixQuestions(input)
+            assert(got == expected, "fix questions: \(input) -> \(got)")
+        }
+        assert(CleanupGuard.applyCommands("Hi team new paragraph the report is ready new line thanks")
+               == "Hi team,\n\nThe report is ready.\nThanks", "spoken commands")
+        assert(CleanupGuard.applyCommands("we need a new line of code") == "we need a new line of code",
+               "spoken command inside a sentence")
+
         Log.app.info("CorrectionEngine self-check passed")
         if CommandLine.arguments.contains("--self-check") {
             print("CorrectionEngine self-check: PASS")
