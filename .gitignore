@@ -22,3 +22,4 @@ xcuserdata/
 # macOS
 .DS_Store
 .claude/worktrees/
+__pycache__/
