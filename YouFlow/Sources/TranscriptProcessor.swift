@@ -242,6 +242,19 @@ enum CorrectionEngine {
         assert(mixed == "My name is Yusha মানে আমার নাম ইউশা", "english spelling: \(mixed)")
         assert(EnglishSpelling.apply(to: "আমি ভালো আছি", apple: words([("Ami", 0.9), ("bhalo", 0.9), ("achi", 0.9)]))
                == "আমি ভালো আছি", "bangla word replaced")
+        // A dropped English word comes back; near-identical spellings are fixed.
+        let dropped = EnglishSpelling.apply(
+            to: "আজকে এর সাথে কথা হয়েছে ওরা তা পছন্দ করেছে",
+            apple: words([("Anjki,", 0.38), ("client,", 0.47), ("E", 0.21), ("Shake,", 0.08), ("Kotha,", 0.37),
+                          ("Hoji,", 0.07), ("Hura.", 0.11), ("Design.", 0.35), ("Tapo,", 0.30), ("Chondo,", 0.30)]),
+            realEnglish: ["client", "design", "shake", "e"])
+        assert(dropped == "আজকে client এর সাথে কথা হয়েছে ওরা design তা পছন্দ করেছে", "dropped English: \(dropped)")
+        let near = EnglishSpelling.apply(to: "আমি এখন meathing এ আছি",
+                                         apple: words([("Ami", 0.2), ("Akon?", 0.23), ("Meeting.", 0.49), ("Eachi,", 0.22)]))
+        assert(near == "আমি এখন meeting এ আছি", "near spelling: \(near)")
+        let dash = EnglishSpelling.apply(to: "please check the dashbord আর আমাকে জানাও",
+                                         apple: words([("Please", 1), ("check", 1), ("the", 0.99), ("dashboard.", 0.95)]))
+        assert(dash == "Please check the dashboard আর আমাকে জানাও", "span across Bangla: \(dash)")
         assert(EnglishSpelling.apply(to: "send the reprt", apple: words([("Send", 0.3), ("the", 0.3), ("report", 0.3)]))
                == "send the reprt", "unsure apple word used")
         assert(EnglishSpelling.apply(to: "please send the reprt.", apple: words([("Please", 0.9), ("send", 0.9), ("the", 0.9), ("report", 0.9)]))
@@ -710,9 +723,13 @@ enum EnglishSpelling {
     static let minConfidence = 0.6
     static let minSimilarity = 0.4
 
-    static func apply(to heard: String, apple: [AppleWord]) -> String {
+    /// `realEnglish`: Apple's words (lowercased, bare) that are real English
+    /// words, checked by the caller on the main thread with the system
+    /// dictionary. Those may be put back where Whisper dropped them.
+    static func apply(to heard: String, apple: [AppleWord], realEnglish: Set<String> = []) -> String {
         let h = heard.split(whereSeparator: \.isWhitespace).map(String.init)
-        guard !h.isEmpty, !apple.isEmpty, h.contains(where: isLatinWord) else { return heard }
+        // Nothing to respell and no English word to put back: as heard.
+        guard !h.isEmpty, !apple.isEmpty, h.contains(where: isLatinWord) || !realEnglish.isEmpty else { return heard }
         let hk = h.map { key(BanglaRomanizer.apply(to: $0)) }
         let ak = apple.map { key($0.text) }
         let n = h.count, m = apple.count
@@ -734,20 +751,49 @@ enum EnglishSpelling {
                 if i < n { relax(i + 1, j, 0.6, nil) }
                 if j < m { relax(i, j + 1, 0.6, nil) }
                 for (hn, an) in [(1, 1), (2, 1), (1, 2), (3, 1), (1, 3)] where i + hn <= n && j + an <= m {
+                    // Several heard words against one Apple word only when all
+                    // are English: "dashbord আর" must not pair with "dashboard".
+                    if hn > 1, !h[i..<i + hn].allSatisfy(isLatinWord) { continue }
                     let s = similarity(hk[i..<i + hn].joined(), ak[j..<j + an].joined())
                     relax(i + hn, j + an, (1 - s) * Double(max(hn, an)), (hn, an, s))
                 }
             }
         }
 
+        // Apple capitalised word `k` because it took it for a sentence start.
+        func startsSentence(_ k: Int) -> Bool {
+            k == 0 || apple[k - 1].text.last.map { ".?!".contains($0) } == true
+        }
         var out = h.map(Optional.some)
+        var inserted: [Int: [String]] = [:]     // before heard word i
         var i = n, j = m
         while i > 0 || j > 0, let step = back[i][j] {
+            // An Apple word nothing heard lines up with: an English word
+            // Whisper dropped ("আজকে client এর সাথে" came back without
+            // "client"). Put back only real English words Apple was not
+            // merely guessing at, and only inside a sentence Whisper heard.
+            if step.span == nil, step.i == i, step.j == j - 1, i > 0, i < n {
+                let word = apple[step.j]
+                let bare = word.text.trimmingCharacters(in: .punctuationCharacters)
+                if word.confidence >= Self.insertConfidence, bare.count >= 4,
+                   realEnglish.contains(bare.lowercased()) {
+                    inserted[i, default: []].insert(midSentence(bare, startsAppleSentence: startsSentence(step.j)), at: 0)
+                }
+            }
+            let sure: (AppleWord, Double) -> Bool = { word, sim in
+                word.confidence >= minConfidence
+                    // Sounds nearly the same and Apple is somewhat sure:
+                    // "meathing" → "meeting" (Apple 0.49 inside Bangla).
+                    || (word.confidence >= Self.closeMatchConfidence && sim >= Self.closeMatch)
+            }
             if let span = step.span,
                span.sim >= minSimilarity,
                h[step.i..<step.i + span.h].allSatisfy(isLatinWord),
-               apple[step.j..<step.j + span.a].allSatisfy({ $0.confidence >= minConfidence }) {
-                let words = apple[step.j..<step.j + span.a].map { $0.text.trimmingCharacters(in: .punctuationCharacters) }
+               apple[step.j..<step.j + span.a].allSatisfy({ sure($0, span.sim) }) {
+                let words = apple[step.j..<step.j + span.a].enumerated().map { offset, word -> String in
+                    let bare = word.text.trimmingCharacters(in: .punctuationCharacters)
+                    return step.i == 0 && offset == 0 ? bare : midSentence(bare, startsAppleSentence: startsSentence(step.j + offset))
+                }
                 if !words.contains(where: \.isEmpty) {
                     // Keep the sentence's own punctuation, not Apple's.
                     let last = h[step.i + span.h - 1]
@@ -759,8 +805,31 @@ enum EnglishSpelling {
             i = step.i
             j = step.j
         }
-        return out.compactMap { $0 }.joined(separator: " ")
+        var result: [String] = []
+        for (k, word) in out.enumerated() {
+            result += inserted[k] ?? []
+            if let word { result.append(word) }
+        }
+        return result.joined(separator: " ")
     }
+
+    /// Apple capitalises what it takes for a sentence start ("Akon? Meeting."
+    /// over Bangla speech); placed inside the heard sentence that capital is
+    /// wrong. A capital Apple gave mid-sentence is a name ("Yusha") and stays,
+    /// as do mixed-case names ("GitHub").
+    private static func midSentence(_ word: String, startsAppleSentence: Bool) -> String {
+        let rest = word.dropFirst()
+        guard startsAppleSentence, rest == rest.lowercased() else { return word }
+        return word.lowercased()
+    }
+
+    /// Bar for using Apple's spelling of a word that sounds nearly the same.
+    static let closeMatchConfidence = 0.45
+    static let closeMatch = 0.75
+    /// Bar for putting back an English word Whisper dropped (Apple's
+    /// "client" was 0.47, "Design" 0.35 in a Bangla sentence; its made-up
+    /// English for Bangla words sits lower: "Shake" 0.08, "Cole" 0.12).
+    static let insertConfidence = 0.3
 
     private static func isLatinWord(_ word: String) -> Bool {
         word.unicodeScalars.contains { ("A"..."Z").contains($0) || ("a"..."z").contains($0) }

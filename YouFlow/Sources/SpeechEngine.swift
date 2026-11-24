@@ -155,6 +155,8 @@ struct AppleTranscript: Sendable {
     var words: [AppleWord] = []
     /// Seconds into the recording that Apple's words cover.
     var spans: [AppleSpan] = []
+    /// Apple's words that are real English words (lowercased, bare).
+    var realEnglish: Set<String> = []
 }
 
 // MARK: - Errors
@@ -730,8 +732,10 @@ actor SpeechEngine {
     }
 
     /// Apple's text when it is sure the speech was English, else Whisper's.
-    private func pick(english: AppleTranscript, whisper: Task<String, Never>, samples: [Float],
+    private func pick(english apple: AppleTranscript, whisper: Task<String, Never>, samples: [Float],
                       mode: SpeechLanguage) async -> String {
+        var english = apple
+        english.realEnglish = await Self.realEnglishWords(apple.words)
         #if DEBUG
         if ProcessInfo.processInfo.environment["UFLOW_TRACE"] != nil {
             let words = english.words.map { "\($0.text)@\(String(format: "%.2f", $0.confidence))" }.joined(separator: " ")
@@ -860,6 +864,22 @@ actor SpeechEngine {
         "to", "tho", "je", "jao", "khao", "dao", "nao", "aro", "shono", "dekho", "keno", "acha",
     ]
 
+    /// Apple's words that the system dictionary knows as English, minus
+    /// common Bangla words that also spell as English.
+    @MainActor
+    static func realEnglishWords(_ words: [AppleWord]) -> Set<String> {
+        let checker = NSSpellChecker.shared
+        return Set(words.compactMap { word -> String? in
+            let bare = word.text.trimmingCharacters(in: .punctuationCharacters).lowercased()
+            guard bare.count >= 2, !banglaLookalikes.contains(bare),
+                  bare.unicodeScalars.allSatisfy({ $0.isASCII && CharacterSet.letters.contains($0) }),
+                  checker.checkSpelling(of: bare, startingAt: 0, language: "en", wrap: false,
+                                        inSpellDocumentWithTag: 0, wordCount: nil).location == NSNotFound
+            else { return nil }
+            return bare
+        })
+    }
+
     /// 1–3 words, every one a real English word and none a Bangla lookalike.
     @MainActor
     static func isShortEnglish(_ text: String) -> Bool {
@@ -900,7 +920,7 @@ actor SpeechEngine {
     private func routeChoice(heard: String, english: AppleTranscript, mode: SpeechLanguage) -> String {
         let hasBangla = heard.unicodeScalars.contains { (0x0980...0x09FF).contains($0.value) }
         if !hasBangla, !english.text.isEmpty { return english.text }
-        return EnglishSpelling.apply(to: heard, apple: english.words)
+        return EnglishSpelling.apply(to: heard, apple: english.words, realEnglish: english.realEnglish)
     }
 
     /// Optional on-device clean-up (`TextCleaner`), set from Settings.
