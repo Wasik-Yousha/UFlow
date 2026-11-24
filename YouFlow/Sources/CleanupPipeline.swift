@@ -16,9 +16,14 @@ struct TextCleaner: Sendable {
     /// one- or two-word reply ("ok", "thik ache") is better left as said.
     static let minimumWords = 3
 
-    /// Both passes together. Measured on an M4 Pro: E2B median 0.12 s, E4B
-    /// 0.19 s per pass. ponytail: generous so an M1 with E2B still fits.
-    static let budget: Duration = .milliseconds(2500)
+    /// Both passes together, scaled with length: an answer has to be written
+    /// word by word, so a fixed limit cut long dictations off and they went
+    /// out uncleaned (12B: every 60-word email hit a flat 2.5 s). Short
+    /// replies stay quick. ponytail: per-word cost measured on M4 Pro with
+    /// 12B; slower Macs run smaller models, which are faster per word.
+    static func budget(words: Int) -> Duration {
+        min(.milliseconds(2000) + .milliseconds(40) * words, .milliseconds(6000))
+    }
 
     func clean(_ text: String) async -> String {
         let words = text.split(whereSeparator: \.isWhitespace).count
@@ -28,8 +33,9 @@ struct TextCleaner: Sendable {
             return text
         }
         let started = ContinuousClock.now
+        let budget = Self.budget(words: words)
         guard let pass1 = await llm.generate(system: CleanupPrompts.system, shots: CleanupPrompts.shots,
-                                             user: text, timeout: Self.budget) else {
+                                             user: text, timeout: budget) else {
             Log.speech.info("Clean-up gave no usable answer in time — text kept as transcribed")
             return text
         }
@@ -37,7 +43,7 @@ struct TextCleaner: Sendable {
 
         var layoutRaw: String?
         if let request = CleanupGuard.layoutRequest(spoken: text, cleanRaw: raw) {
-            let left = Self.budget - (ContinuousClock.now - started)
+            let left = budget - (ContinuousClock.now - started)
             if left > .milliseconds(200),
                let pass2 = await llm.generate(system: CleanupPrompts.layoutSystem,
                                               shots: CleanupPrompts.layoutShots,
@@ -68,9 +74,12 @@ final class CleanupController: ObservableObject {
         case failed(String)
     }
 
-    let model = CleanupModel.forThisMac()
-    let llm: LocalLLM
+    /// The models this Mac's memory allows; more than one only at 18 GB+.
+    let choices = CleanupModel.choicesForThisMac()
+    @Published private(set) var model: CleanupModel
+    private(set) var llm: LocalLLM
     @Published private(set) var phase: Phase
+    private static let choiceKey = "cleanup.model"
     private var download: Task<Void, Never>?
 
     /// The model clean-up actually runs on: this Mac's own model when it is
@@ -80,8 +89,26 @@ final class CleanupController: ObservableObject {
     @Published private(set) var active: LocalLLM?
 
     init() {
-        llm = LocalLLM(model: model)
-        phase = model.isDownloaded ? .ready : .notDownloaded
+        let allowed = CleanupModel.choicesForThisMac()
+        let stored = UserDefaults.standard.string(forKey: Self.choiceKey).flatMap(CleanupModel.init(rawValue:))
+        let chosen = stored.flatMap { allowed.contains($0) ? $0 : nil } ?? allowed[0]
+        model = chosen
+        llm = LocalLLM(model: chosen)
+        phase = chosen.isDownloaded ? .ready : .notDownloaded
+        refresh()
+    }
+
+    /// Switches this Mac's model (Settings picker). A download in progress
+    /// for the old choice is cancelled; the new one needs its own Download
+    /// unless it is already on disk.
+    func choose(_ choice: CleanupModel) {
+        guard choice != model, choices.contains(choice) else { return }
+        cancelDownload()
+        download = nil
+        model = choice
+        llm = LocalLLM(model: choice)
+        phase = choice.isDownloaded ? .ready : .notDownloaded
+        UserDefaults.standard.set(choice.rawValue, forKey: Self.choiceKey)
         refresh()
     }
 
@@ -95,7 +122,7 @@ final class CleanupController: ObservableObject {
         let best = CleanupModel.allCases
             .filter { $0.bytes <= model.bytes && $0.isDownloaded }
             .max { $0.bytes < $1.bytes }
-        guard best != active?.model else { return }
+        guard best != active?.model || (best == model && active !== llm) else { return }
         active?.unload()
         active = best.map { $0 == model ? llm : LocalLLM(model: $0) }
         if let best { Log.app.info("Clean-up uses \(best.displayName, privacy: .public)") }
