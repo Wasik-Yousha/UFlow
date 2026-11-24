@@ -14,6 +14,10 @@ protocol StatusInfoProvider: AnyObject {
     func openSettingsRequested()
     /// The dictation language, switchable straight from the menu.
     var dictationLanguage: SpeechLanguage { get set }
+    /// There is a transcript to paste again.
+    var canPasteLastDictation: Bool { get }
+    /// Re-pastes the newest transcript into the app in front.
+    func pasteLastDictationRequested()
 }
 
 /// Owns the NSStatusItem: a small mic glyph plus the status menu described in
@@ -41,6 +45,9 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
         let menu = NSMenu()
         menu.delegate = self
+        // Items carry their own enabled state ("Paste Last Dictation" with
+        // nothing to paste); auto-enabling would switch every targeted item on.
+        menu.autoenablesItems = false
         statusItem.menu = menu
     }
 
@@ -81,6 +88,20 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             detailItem.isEnabled = false
             menu.addItem(detailItem)
         }
+
+        // For when a paste didn't land. The key equivalent only shows the
+        // global shortcut (registered separately); it does nothing on its own.
+        menu.addItem(.separator())
+        let combo = GlobalShortcut.Combo.pasteLast
+        let pasteLast = NSMenuItem(
+            title: "Paste Last Dictation",
+            action: #selector(pasteLastClicked),
+            keyEquivalent: combo.keyEquivalent
+        )
+        pasteLast.keyEquivalentModifierMask = combo.modifierMask
+        pasteLast.target = self
+        pasteLast.isEnabled = provider.canPasteLastDictation
+        menu.addItem(pasteLast)
 
         // One click from any app: the language is the setting people change
         // most, so it sits right under the status line.
@@ -181,6 +202,10 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     /// The System Settings privacy pane, which is a different thing entirely.
     @objc private func openPrivacyClicked() {
         provider?.openSettingsRequested()
+    }
+
+    @objc private func pasteLastClicked() {
+        provider?.pasteLastDictationRequested()
     }
 
     @objc private func languageClicked(_ sender: NSMenuItem) {

@@ -48,6 +48,7 @@ struct SettingsView: View {
             } footer: {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(app.settings.effectiveHotkeyMode.detail + " Works in any app; the text is typed where you were.")
+                    Text("\(GlobalShortcut.Combo.pasteLast.symbol) pastes your last dictation again, if a paste didn't land.")
                     if app.settings.triggerKeyCode == nil {
                         Text("A modifier alone always holds — as a toggle it would fire on every incidental tap.")
                         if app.settings.modifierKeyCode == kVK_Function {
@@ -137,6 +138,14 @@ struct SettingsView: View {
                     }
                 }
                 Text("\(app.dictionary.entries.count) entries. Edit the file in any text editor — UFlow re-reads it when you come back.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
+                Toggle("Learn from my corrections", isOn: Binding(
+                    get: { app.settings.learnFromCorrections },
+                    set: { app.settings.learnFromCorrections = $0 }
+                ))
+                Text("When you fix a word UFlow misheard right after dictating — \u{201C}cloud code\u{201D} to \u{201C}Claude Code\u{201D} — it suggests a correction in the Dictionary tab for you to add or dismiss. To spot the fix it reads the text field once after pasting and again about 25 seconds later, or when you next dictate. Only the corrected word pairs are kept, never the text around them, and nothing leaves your Mac. Password fields are never read. Uses the Accessibility permission.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }

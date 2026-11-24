@@ -27,6 +27,10 @@ struct DictionaryView: View {
                     .emboss(Tok.R.control)
             }
 
+            if !app.suggestions.suggestions.isEmpty {
+                SuggestionsCard()
+            }
+
             if results.isEmpty {
                 EmptyState(
                     icon: "character.book.closed",
@@ -146,6 +150,100 @@ private struct DictionaryRow: View {
         .onHover { hovering = $0 }
         .onTapGesture(count: 2, perform: edit)
         .animation(Tok.M.hover, value: hovering)
+    }
+}
+
+// MARK: - Suggestions
+
+/// Fixes proposed from the user's own corrections ("Learn from my
+/// corrections"). Nothing joins the dictionary until Add is pressed.
+private struct SuggestionsCard: View {
+    @EnvironmentObject private var app: AppState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Suggested from your corrections")
+                .tokType(Tok.T.micro)
+                .foregroundStyle(Tok.C.textSecondary)
+                .padding(.horizontal, Tok.S.s12)
+                .padding(.top, Tok.S.s8)
+                .padding(.bottom, Tok.S.s4)
+
+            // Up to three rows as they are; beyond that they scroll, so the
+            // dictionary below stays in view.
+            if app.suggestions.suggestions.count <= 3 {
+                rows
+            } else {
+                ScrollView { rows }
+                    .frame(height: Tok.L.rowMinHeight * 3.5)
+            }
+        }
+        .background(Tok.C.surface, in: RoundedRectangle(cornerRadius: Tok.R.card, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: Tok.R.card, style: .continuous)
+                .strokeBorder(Tok.C.corrected.opacity(0.5), lineWidth: Tok.W.hairline)
+        }
+    }
+
+    private var rows: some View {
+        LazyVStack(spacing: 0) {
+            ForEach(app.suggestions.suggestions) { suggestion in
+                SuggestionRow(suggestion: suggestion)
+            }
+        }
+    }
+}
+
+private struct SuggestionRow: View {
+    @EnvironmentObject private var app: AppState
+    let suggestion: CorrectionSuggestion
+
+    /// The same check the editor shows before saving an entry.
+    private var risk: DictionaryEntry.Risk? {
+        DictionaryEntry.risk(kind: .fix, match: suggestion.heard, replacement: suggestion.written)
+    }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Tok.S.s12) {
+            VStack(alignment: .leading, spacing: Tok.S.s2) {
+                HStack(spacing: Tok.S.s8) {
+                    Text(suggestion.heard)
+                        .tokType(Tok.T.term)
+                        .foregroundStyle(Tok.C.textSecondary)
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Tok.C.textTertiary)
+                    Text(suggestion.written)
+                        .tokType(Tok.T.term)
+                        .foregroundStyle(Tok.C.textPrimary)
+                    if suggestion.count > 1 {
+                        Text("\(suggestion.count)\u{00D7}")
+                            .tokType(Tok.T.count)
+                            .foregroundStyle(Tok.C.corrected)
+                    }
+                }
+                if let risk {
+                    Text(risk.message)
+                        .tokType(Tok.T.caption)
+                        .foregroundStyle(Tok.C.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Spacer(minLength: Tok.S.s12)
+
+            HStack(spacing: Tok.S.s16) {
+                TokTextButton(title: "Add", sound: .add) {
+                    withAnimation(Tok.M.listRow) { app.acceptSuggestion(suggestion) }
+                }
+                TokTextButton(title: "Dismiss", tint: Tok.C.textSecondary, sound: .delete) {
+                    withAnimation(Tok.M.listRow) { app.dismissSuggestion(suggestion) }
+                }
+            }
+        }
+        .padding(.horizontal, Tok.S.s12)
+        .padding(.vertical, Tok.S.s6)
+        .frame(minHeight: Tok.L.rowMinHeight)
     }
 }
 
