@@ -1,4 +1,5 @@
 import AVFAudio
+import AppKit
 import CoreAudio
 import CoreMedia
 import Foundation
@@ -718,8 +719,49 @@ actor SpeechEngine {
             Log.speech.info("Routed to Apple (confidence \(confidence, privacy: .public))")
             return english.text
         }
+        // Short replies ("no", "cool", "got it") get less confidence from
+        // Apple than sentences, and the Bangla model turns them into Bangla
+        // ("no" → "nao"). A lower bar is safe only when every word Apple
+        // heard is a real English word and none of them is a common Bangla
+        // word that also spells as English ("bolo", "ki").
+        if let confidence = english.confidence, confidence >= Self.shortEnglishConfidence,
+           await Self.isShortEnglish(english.text) {
+            whisper.cancel()
+            Log.speech.info("Routed to Apple: short English reply (confidence \(confidence, privacy: .public))")
+            return english.text
+        }
         Log.speech.info("Routed to Whisper (Apple confidence \(english.confidence ?? -1, privacy: .public), \(english.words.count, privacy: .public) words)")
         return route(heard: await whisper.value, english: english, mode: mode)
+    }
+
+    /// The bar for 1–3 word replies that are all real English words.
+    /// Measured on 116 short clips (5 English voices incl. two Indian
+    /// English, 16 Bangla words): English that went astray 0.735–0.814
+    /// ("no", "wait", "cool"); Bangla read as real English words at most
+    /// 0.644 (নাও → "Now."; না → "No." 0.606). ponytail: synthetic voices —
+    /// recalibrate on real recordings if short Bangla replies turn English.
+    private static let shortEnglishConfidence = 0.70
+
+    /// Common Bangla words that macOS's English dictionary also accepts.
+    private static let banglaLookalikes: Set<String> = [
+        "bolo", "cholo", "ji", "jee", "g", "ki", "key", "he", "na", "nah", "ha", "haa", "hum", "hmm",
+        "to", "tho", "je", "jao", "khao", "dao", "nao", "aro", "shono", "dekho", "keno", "acha",
+    ]
+
+    /// 1–3 words, every one a real English word and none a Bangla lookalike.
+    @MainActor
+    static func isShortEnglish(_ text: String) -> Bool {
+        let words = text.split(whereSeparator: \.isWhitespace)
+            .map { $0.trimmingCharacters(in: .punctuationCharacters).lowercased() }
+            .filter { !$0.isEmpty }
+        guard (1...3).contains(words.count) else { return false }
+        let checker = NSSpellChecker.shared
+        return words.allSatisfy { word in
+            !banglaLookalikes.contains(word)
+                && word.unicodeScalars.allSatisfy { $0.isASCII }
+                && checker.checkSpelling(of: word, startingAt: 0, language: "en", wrap: false,
+                                         inSpellDocumentWithTag: 0, wordCount: nil).location == NSNotFound
+        }
     }
 
     /// Apple's mean word confidence that marks an utterance as English.
@@ -734,6 +776,16 @@ actor SpeechEngine {
     /// 31% WER on our English set). In a mixed sentence the English words
     /// take Apple's spelling one by one (`EnglishSpelling`).
     private func route(heard: String, english: AppleTranscript, mode: SpeechLanguage) -> String {
+        let out = routeChoice(heard: heard, english: english, mode: mode)
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["UFLOW_TRACE"] != nil {
+            FileHandle.standardError.write(Data("TRACE\tapple=\(english.text)\tconf=\(english.confidence.map { String(format: "%.3f", $0) } ?? "-")\twhisper=\(heard)\tout=\(out)\n".utf8))
+        }
+        #endif
+        return out
+    }
+
+    private func routeChoice(heard: String, english: AppleTranscript, mode: SpeechLanguage) -> String {
         let hasBangla = heard.unicodeScalars.contains { (0x0980...0x09FF).contains($0.value) }
         if !hasBangla, !english.text.isEmpty { return english.text }
         let spelled = EnglishSpelling.apply(to: heard, apple: english.words)

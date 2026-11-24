@@ -264,6 +264,18 @@ enum CorrectionEngine {
             assert(got == expected, "chunk join: \(parts) -> \(got)")
         }
 
+        // Short English replies: real English words only, no Bangla lookalikes.
+        if Thread.isMainThread {
+            MainActor.assumeIsolated {
+                for yes in ["No.", "Cool.", "Got it.", "Sounds good.", "Call me."] {
+                    assert(SpeechEngine.isShortEnglish(yes), "short English rejected: \(yes)")
+                }
+                for no in ["Bolo.", "Cholo?", "Pikachi.", "Ancha.", "Please send the report now.", "", "জি"] {
+                    assert(!SpeechEngine.isShortEnglish(no), "Bangla read as short English: \(no)")
+                }
+            }
+        }
+
         // Silence gate: a short word in a long hold is speech; faint hiss and
         // the 120 ms start click on their own are not.
         let gate = SpeechEngine.minimumAudibleSeconds
