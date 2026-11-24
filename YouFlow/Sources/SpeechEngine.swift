@@ -693,6 +693,13 @@ actor SpeechEngine {
     /// transcript, and tears the session down. Returns the final text (possibly
     /// empty — callers decide what to do with that).
     func stopRecordingAndCollect() async -> String {
+        let mode = whisperSession?.language ?? activeSession?.language ?? language
+        return await finish(await collectScript(), mode: mode)
+    }
+
+    /// The transcript in the script it was spoken in (Bangla stays Bangla
+    /// script); romanizing for Banglish happens in `finish`, after clean-up.
+    private func collectScript() async -> String {
         if let session = whisperSession { return await stopWhisperRecording(session) }
         guard let session = activeSession else { return "" }
         guard let collector = session.collector else { return await finishApple(session).text }
@@ -788,8 +795,23 @@ actor SpeechEngine {
     private func routeChoice(heard: String, english: AppleTranscript, mode: SpeechLanguage) -> String {
         let hasBangla = heard.unicodeScalars.contains { (0x0980...0x09FF).contains($0.value) }
         if !hasBangla, !english.text.isEmpty { return english.text }
-        let spelled = EnglishSpelling.apply(to: heard, apple: english.words)
-        return mode == .banglish ? BanglaRomanizer.apply(to: spelled) : spelled
+        return EnglishSpelling.apply(to: heard, apple: english.words)
+    }
+
+    /// Optional on-device clean-up (`TextCleaner`), set from Settings.
+    private var cleaner: TextCleaner?
+
+    func setCleaner(_ cleaner: TextCleaner?) { self.cleaner = cleaner }
+
+    /// Last steps on the spoken-script transcript: fillers out, then the
+    /// clean-up model (which works best on Bangla script, before
+    /// romanization, and never sees Banglish), then Banglish romanization.
+    private func finish(_ script: String, mode: SpeechLanguage) async -> String {
+        var text = script
+        if let cleaner, !text.isEmpty {
+            text = await cleaner.clean(FillerFilter.apply(to: text))
+        }
+        return mode == .banglish ? BanglaRomanizer.apply(to: text) : text
     }
 
     /// Stops Apple's analyzer and collects its final transcript and confidence.
@@ -1305,13 +1327,13 @@ extension SpeechEngine {
             buffer.floatChannelData.map { Array(UnsafeBufferPointer(start: $0[0], count: Int(buffer.frameLength))) }
         } ?? []
 
-        guard language.usesWhisper else { return try await appleTranscript(of: url).text }
+        guard language.usesWhisper else { return await finish(try await appleTranscript(of: url).text, mode: language) }
         let mode = language
         let whisperTask = Task { await self.transcribeWhisper(samples, mode: mode) }
         guard mode.usesEnglishCompanion, resolvedLocale != nil else {
-            return route(heard: await whisperTask.value, english: AppleTranscript(), mode: mode)
+            return await finish(route(heard: await whisperTask.value, english: AppleTranscript(), mode: mode), mode: mode)
         }
-        return await pick(english: try await appleTranscript(of: url), whisper: whisperTask, mode: mode)
+        return await finish(await pick(english: try await appleTranscript(of: url), whisper: whisperTask, mode: mode), mode: mode)
     }
 
     private func appleTranscript(of url: URL) async throws -> AppleTranscript {

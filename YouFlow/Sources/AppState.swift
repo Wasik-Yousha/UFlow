@@ -37,6 +37,8 @@ final class AppState: ObservableObject, StatusInfoProvider {
     let dictionary = DictionaryStore()
     let settings = AppSettings()
     let suggestions = SuggestionStore()
+    /// The on-device clean-up model for this Mac (Settings → Clean-up).
+    let cleanup = CleanupController()
 
     private let hotkeyManager = HotkeyManager()
     private let engine = SpeechEngine()
@@ -146,6 +148,21 @@ final class AppState: ObservableObject, StatusInfoProvider {
             .dropFirst()
             .sink { [weak self] language in
                 self?.applyLanguage(language)
+            }
+            .store(in: &cancellables)
+
+        // Clean-up runs only when switched on AND the model is on disk; the
+        // engine gets a cleaner or nil, so a dictation never waits on a
+        // missing model.
+        cleanup.objectWillChange
+            .sink { [weak self] in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+        settings.$cleanupEnabled.combineLatest(cleanup.$phase)
+            .sink { [weak self] enabled, phase in
+                guard let self else { return }
+                let cleaner = enabled && phase == .ready ? TextCleaner(llm: self.cleanup.llm) : nil
+                if cleaner == nil, phase == .ready { self.cleanup.llm.unload() }
+                Task { await self.engine.setCleaner(cleaner) }
             }
             .store(in: &cancellables)
 
@@ -445,6 +462,8 @@ final class AppState: ObservableObject, StatusInfoProvider {
         releasePending = false
 
         if origin == .hotkey { playStartCue() }
+        // Load the clean-up model while the user is still talking.
+        if settings.cleanupEnabled { cleanup.warmUp() }
 
         state = .recording
         startElapsedClock()

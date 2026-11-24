@@ -19,6 +19,7 @@ SHOTS = [
 ]
 
 PUNCT = ",.।?!;:"
+QUOTES = "\"\u201c\u201d\u00ab\u00bb"
 MARKERS = {"মানে", "আচ্ছা", "না", "sorry", "wait", "mean", "সরি", "নাহ"}
 CALL_WORDS = {"শোনো", "শুনো", "ভাই", "আপা", "আপু", "দোস্ত", "hey", "hi", "hello", "listen"}
 
@@ -91,7 +92,10 @@ def project(spoken, model_out):
     kept = {}                      # spoken index -> punctuation/casing taken from the model
     for op, i, j in ops:
         if op == "keep":           # same word or the model changed it: the spoken word stays
-            mw = out[j]
+            # Quotation marks the model wrapped around the text are never kept:
+            # only its casing and trailing punctuation are (E4B once returned
+            # '"Start a new paragraph after the quote."').
+            mw = out[j].strip(QUOTES)
             trail = re.sub(r"^.*?([" + PUNCT + r"]*)$", r"\1", mw)
             core = words[i].strip(PUNCT)
             if norm(mw) == norm(core): core = mw.strip(PUNCT)    # casing only

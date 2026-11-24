@@ -529,6 +529,7 @@ final class AppSettings: ObservableObject {
         static let appearance = "ui.appearance"
         static let launchAtLogin = "ui.launchAtLogin"
         static let learnFromCorrections = "dictionary.learnFromCorrections"
+        static let cleanupEnabled = "cleanup.enabled"
     }
 
     private let defaults = UserDefaults.standard
@@ -557,6 +558,12 @@ final class AppSettings: ObservableObject {
     /// (once after the paste, once after the user had time to fix it).
     @Published var learnFromCorrections: Bool {
         didSet { defaults.set(learnFromCorrections, forKey: Key.learnFromCorrections) }
+    }
+
+    /// On-device clean-up (stutters, restarts, punctuation, lists). On by
+    /// default, but it does nothing until the model is downloaded in Settings.
+    @Published var cleanupEnabled: Bool {
+        didSet { defaults.set(cleanupEnabled, forKey: Key.cleanupEnabled) }
     }
 
     @Published var appearance: AppearancePreference {
@@ -594,6 +601,7 @@ final class AppSettings: ObservableObject {
         soundEnabled = defaults.object(forKey: Key.sound) as? Bool ?? true
         showMenuBarItem = defaults.object(forKey: Key.menuBar) as? Bool ?? true
         learnFromCorrections = defaults.object(forKey: Key.learnFromCorrections) as? Bool ?? false
+        cleanupEnabled = defaults.object(forKey: Key.cleanupEnabled) as? Bool ?? true
         launchAtLogin = defaults.object(forKey: Key.launchAtLogin) as? Bool ?? true
         appearance = (defaults.string(forKey: Key.appearance)
             .flatMap(AppearancePreference.init(rawValue:))) ?? .system

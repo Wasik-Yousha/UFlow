@@ -143,7 +143,9 @@ final class LocalLLM: @unchecked Sendable {
         // Not on `queue`: a generation running there must be told to stop.
         let source = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical],
                                                              queue: .global(qos: .userInitiated))
-        source.setEventHandler { [weak self] in self?.memoryPressure() }
+        source.setEventHandler { [weak self, weak source] in
+            self?.memoryPressure(critical: source?.data.contains(.critical) ?? true)
+        }
         source.activate()
         pressureSource = source
     }
@@ -193,19 +195,38 @@ final class LocalLLM: @unchecked Sendable {
     #if DEBUG
     /// What the pressure source does, for `--llm --wait-pressure` when the
     /// OS can't be made to send one (`memory_pressure -S` needs root).
-    func simulateMemoryPressure() { memoryPressure() }
+    func simulateMemoryPressure() { memoryPressure(critical: true) }
     #endif
 
-    private func memoryPressure() {
+    /// Critical: stop now, unload, and skip clean-up for `pressureCooldown`.
+    ///
+    /// Warning: keep cleaning, but release the model straight after each use
+    /// instead of keeping it warm. An 8 GB Mac with a browser open sits at
+    /// the warning level much of the time, and skipping there would mean
+    /// clean-up never runs on exactly the Macs that asked for the small
+    /// model. The weights are clean memory-mapped pages, so macOS reclaims
+    /// them freely; what unloading gives back is the context and GPU buffers.
+    private func memoryPressure(critical: Bool) {
         lock.withLock {
-            lastPressure = Date()
-            inFlight.forEach { $0.set() }
+            lastWarning = Date()
+            if critical {
+                lastPressure = Date()
+                inFlight.forEach { $0.set() }
+            }
         }
         queue.async {
-            if self.llm != nil { Self.log.notice("Memory pressure — unloading the clean-up model") }
+            if self.llm != nil {
+                Self.log.notice("Memory pressure (\(critical ? "critical" : "warning", privacy: .public)) — unloading the clean-up model")
+            }
             self.free()
         }
     }
+
+    /// A warning arrived recently: unload after each generation.
+    private var underWarning: Bool {
+        lock.withLock { lastWarning.map { Date().timeIntervalSince($0) < Self.pressureCooldown } ?? false }
+    }
+    private var lastWarning: Date?
 
     // MARK: - Download
 
@@ -493,7 +514,7 @@ final class LocalLLM: @unchecked Sendable {
         func expired() -> Bool { abort.isSet || ContinuousClock.now >= deadline }
         guard !expired() else { return nil }
         guard load(), let llm else { return nil }
-        defer { scheduleIdleUnload() }
+        defer { if underWarning { free() } else { scheduleIdleUnload() } }
 
         let prompt = self.prompt(system: system, shots: shots, user: user)
         let cap = maxTokens ?? (tokenize(user.trimmingCharacters(in: .whitespacesAndNewlines), parseSpecial: false).count * 3 / 2 + 16)

@@ -362,6 +362,9 @@ enum CorrectionEngine {
             // a real stutter and a proven self-correction are removed
             ("সে সে আজকে আসবে না", "সে আজকে আসবে না।", "সে আজকে আসবে না।"),
             ("call him at three no wait at four", "Call him at four.", "Call him at four."),
+            // quotation marks the model wraps around its answer are dropped
+            ("start a new paragraph after the quote", "\"Start a new paragraph after the quote.\"",
+             "Start a new paragraph after the quote."),
         ] {
             let got = CleanupGuard.finalize(spoken: said, cleanRaw: model, layoutRaw: nil)
             assert(got == expected, "cleanup guard: \(said) / \(model) -> \(got)")

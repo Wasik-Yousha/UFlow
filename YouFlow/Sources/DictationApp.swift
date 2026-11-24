@@ -95,6 +95,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             CleanupReplay.dumpPrompts()
             exit(0)
         }
+        if let flag = CommandLine.arguments.firstIndex(of: "--cleanup-run") {
+            CleanupRun.run(Array(CommandLine.arguments[(flag + 1)...]))
+            return
+        }
         if let flag = CommandLine.arguments.firstIndex(of: "--llm") {
             LLMCheck.run(Array(CommandLine.arguments[(flag + 1)...]))
             return
@@ -391,6 +395,51 @@ enum CleanupReplay {
         if let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) {
             FileHandle.standardOutput.write(data)
             print()
+        }
+    }
+}
+
+/// `UFlow --cleanup-run <e2b|e4b|e12b> <out.json> <cases.json>…` runs every
+/// case's "said" text through the real in-app clean-up (llama.cpp model +
+/// Swift guard, exactly as a dictation would) and writes the results for
+/// tools/cleanup-eval/grade_app.py to grade with guard.py's own `grade()`.
+enum CleanupRun {
+    static func run(_ args: [String]) {
+        guard args.count >= 3, let model = CleanupModel(rawValue: args[0]) else {
+            print("usage: --cleanup-run <e2b|e4b|e12b> <out.json> <cases.json>…")
+            NSApp.terminate(nil); return
+        }
+        Task.detached {
+            let llm = LocalLLM(model: model)
+            guard llm.isDownloaded, await llm.loadNow() else {
+                print("model \(model.rawValue) is not downloaded or failed to load")
+                await MainActor.run { NSApp.terminate(nil) }; return
+            }
+            let cleaner = TextCleaner(llm: llm)
+            var rows: [[String: Any]] = []
+            for path in args.dropFirst(2) {
+                guard let data = FileManager.default.contents(atPath: path),
+                      let cases = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+                    print("cannot read \(path)"); continue
+                }
+                for c in cases {
+                    guard let said = c["said"] as? String else { continue }
+                    let started = ContinuousClock.now
+                    let final = await cleaner.clean(said)
+                    let d = ContinuousClock.now - started
+                    var row = c
+                    row["final"] = final
+                    row["set"] = (path as NSString).lastPathComponent
+                    row["ms"] = Int(d.components.seconds * 1000 + d.components.attoseconds / 1_000_000_000_000_000)
+                    rows.append(row)
+                }
+            }
+            if let out = try? JSONSerialization.data(withJSONObject: rows, options: [.prettyPrinted]) {
+                FileManager.default.createFile(atPath: args[1], contents: out)
+            }
+            print("\(rows.count) cases → \(args[1])")
+            llm.freeNow()
+            await MainActor.run { NSApp.terminate(nil) }
         }
     }
 }

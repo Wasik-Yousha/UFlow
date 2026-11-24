@@ -97,6 +97,8 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            CleanupSection(cleanup: app.cleanup)
+
             Section {
                 Picker("Appearance", selection: Binding(
                     get: { app.settings.appearance },
@@ -153,5 +155,63 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(width: 460)
         .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// Settings → Clean-up: the one model this Mac's memory suits, and its download.
+private struct CleanupSection: View {
+    @EnvironmentObject private var app: AppState
+    @ObservedObject var cleanup: CleanupController
+
+    var body: some View {
+        Section {
+            Toggle("Clean up what I say", isOn: Binding(
+                get: { app.settings.cleanupEnabled },
+                set: { app.settings.cleanupEnabled = $0 }
+            ))
+            .disabled(!cleanup.isReady)
+
+            LabeledContent("Model") {
+                Text("\(cleanup.model.displayName) · \(cleanup.sizeText)")
+                    .monospacedDigit()
+            }
+
+            switch cleanup.phase {
+            case .notDownloaded:
+                LabeledContent("Status") {
+                    Button("Download") { cleanup.startDownload() }
+                }
+            case .downloading(let fraction):
+                LabeledContent("Downloading") {
+                    HStack(spacing: 8) {
+                        ProgressView(value: fraction).frame(width: 140)
+                        Text("\(Int(fraction * 100))%").monospacedDigit().foregroundStyle(.secondary)
+                        Button("Cancel") { cleanup.cancelDownload() }
+                    }
+                }
+            case .ready:
+                LabeledContent("Status") {
+                    HStack(spacing: 8) {
+                        Text("Installed").foregroundStyle(Tok.C.accent)
+                        Button("Remove") { cleanup.remove() }
+                    }
+                }
+            case .failed(let reason):
+                LabeledContent("Status") {
+                    Button("Try again") { cleanup.startDownload() }
+                }
+                Text(reason)
+                    .font(.callout)
+                    .foregroundStyle(.red)
+            }
+        } header: {
+            Text("Clean-up")
+        } footer: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Removes stutters, false starts and corrected slips (\u{201C}at five, no sorry, six\u{201D} → \u{201C}at six\u{201D}), adds punctuation, and turns spoken lists into numbered ones. It only ever deletes words it can prove were slips — anything else stays exactly as you said it.")
+                Text("Runs on your Mac. Picked for your \(cleanup.memoryText) of memory: 8 GB Macs get Gemma 4 E2B, 16 GB get E4B, 18 GB and up get 12B. Downloaded once from Hugging Face and checked; it loads while you talk and unloads when idle or when memory runs low.")
+            }
+            .foregroundStyle(.secondary)
+        }
     }
 }

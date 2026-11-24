@@ -343,7 +343,10 @@ enum CleanupGuard {
         for op in ops {
             guard case let .keep(i, j) = op else { continue }
             // same word or the model changed it: the spoken word stays
-            let mw = out[j]
+            // Quotation marks the model wrapped around the text are never kept:
+            // only its casing and trailing punctuation are (E4B once returned
+            // "\"Start a new paragraph after the quote.\"").
+            let mw = out[j].strip(quotes)
             let trail = PyStr(scalars: mw.u.reversed().prefix(while: { punct.u.contains($0) }).reversed())
             var core = words[i].strip(punct)
             if norm(mw) == norm(core) { core = mw.strip(punct) }     // casing only
@@ -819,6 +822,8 @@ extension CleanupPrompts {
 extension CleanupGuard {
     /// PUNCT
     fileprivate static let punct: PyStr = ",.।?!;:"
+    /// guard.py QUOTES: quotation marks a model may wrap around its output.
+    fileprivate static let quotes: PyStr = "\"\u{201C}\u{201D}\u{00AB}\u{00BB}"
     /// END
     fileprivate static let end: PyStr = ".?!"
     /// MARKERS: words whose deletion costs 0.9 in `align`.
