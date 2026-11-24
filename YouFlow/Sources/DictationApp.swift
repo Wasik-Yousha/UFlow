@@ -87,6 +87,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             FileTranscription.run(Array(CommandLine.arguments[(flag + 1)...]))
             return
         }
+        if let flag = CommandLine.arguments.firstIndex(of: "--cleanup-replay") {
+            let ok = CleanupReplay.run(Array(CommandLine.arguments[(flag + 1)...]))
+            exit(ok ? 0 : 1)
+        }
+        if CommandLine.arguments.contains("--cleanup-prompts") {
+            CleanupReplay.dumpPrompts()
+            exit(0)
+        }
+        if let flag = CommandLine.arguments.firstIndex(of: "--cleanup-run") {
+            CleanupRun.run(Array(CommandLine.arguments[(flag + 1)...]))
+            return
+        }
+        if let flag = CommandLine.arguments.firstIndex(of: "--llm") {
+            LLMCheck.run(Array(CommandLine.arguments[(flag + 1)...]))
+            return
+        }
         #endif
 
         let state = AppState.shared
@@ -214,9 +230,29 @@ enum Snapshot {
         Task {
             // Let the window lay out, load fonts, and settle its animations.
             try? await Task.sleep(for: .seconds(2))
-            capture(to: path)
+            if ProcessInfo.processInfo.environment["UFLOW_SNAPSHOT_TAB"] == "settings" {
+                captureSettings(to: path)
+            } else {
+                capture(to: path)
+            }
             NSApp.terminate(nil)
         }
+    }
+
+    /// Settings renders in its own scene; draw the view directly instead.
+    @MainActor
+    private static func captureSettings(to path: String) {
+        let host = NSHostingView(rootView: SettingsView().environmentObject(AppState.shared))
+        host.appearance = NSApp.appearance
+        let size = host.fittingSize
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled],
+                              backing: .buffered, defer: false)
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return }
+        host.cacheDisplay(in: host.bounds, to: rep)
+        try? rep.representation(using: .png, properties: [:])?.write(to: URL(filePath: path))
+        Log.app.info("Settings snapshot written")
     }
 
     @MainActor
@@ -271,7 +307,12 @@ enum MenuDump {
             controller.menuNeedsUpdate(menu)
             print("[\(title)]")
             for item in menu.items {
-                print("    \(item.isSeparatorItem ? "---" : (item.state == .on ? "✓ " : "  ") + item.title)")
+                let mask = item.keyEquivalentModifierMask
+                let modifiers = (mask.contains(.control) ? "⌃" : "") + (mask.contains(.option) ? "⌥" : "")
+                    + (mask.contains(.command) ? "⌘" : "")
+                let shortcut = item.keyEquivalent.isEmpty ? "" : "  \(modifiers)\(item.keyEquivalent.uppercased())"
+                let disabled = item.action != nil && !item.isEnabled ? "  (disabled)" : ""
+                print("    \(item.isSeparatorItem ? "---" : (item.state == .on ? "✓ " : "  ") + item.title)\(shortcut)\(disabled)")
             }
         }
         dump("status menu")
@@ -310,5 +351,377 @@ enum FileTranscription {
             NSApp.terminate(nil)
         }
     }
+}
+#endif
+
+#if DEBUG
+/// `UFlow --cleanup-replay tools/cleanup-eval/recorded/*.json` replays every
+/// recorded row (the model's raw pass-1 and pass-2 outputs) through the Swift
+/// clean-up guard and compares the result byte for byte with what guard.py
+/// produced (`final`, and `flat` for the pass-1 text). Exits 1 on a mismatch.
+///
+/// `UFlow --cleanup-prompts` prints the prompts as JSON, for comparison with guard.py.
+enum CleanupReplay {
+    static func run(_ paths: [String]) -> Bool {
+        var total = 0, matched = 0
+        func same(_ a: String, _ b: String) -> Bool { a.utf8.elementsEqual(b.utf8) }
+        for path in paths {
+            guard let data = FileManager.default.contents(atPath: path),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: [[String: Any]]] else {
+                print("ERROR cannot read \(path)")
+                return false
+            }
+            for model in json.keys.sorted() {
+                for row in json[model] ?? [] {
+                    total += 1
+                    guard let said = row["said"] as? String, let raw = row["raw"] as? String,
+                          let final = row["final"] as? String else {
+                        print("ERROR malformed row in \(path) [\(model)]")
+                        continue
+                    }
+                    let layoutRaw = row["layout_raw"] as? String
+                    let got = CleanupGuard.finalize(spoken: said, cleanRaw: raw, layoutRaw: layoutRaw)
+                    let flat = CleanupGuard.flat(spoken: said, cleanRaw: raw)
+                    let expectedFlat = row["flat"] as? String ?? flat
+                    let wantsLayout = CleanupGuard.layoutRequest(spoken: said, cleanRaw: raw) != nil
+                    if same(got, final) && same(flat, expectedFlat) && wantsLayout == (layoutRaw != nil) {
+                        matched += 1
+                        continue
+                    }
+                    print("MISMATCH \((path as NSString).lastPathComponent) [\(model)]")
+                    print("  said:   \(said.debugDescription)")
+                    print("  python: \(final.debugDescription)")
+                    print("  swift:  \(got.debugDescription)")
+                    if !same(flat, expectedFlat) {
+                        print("  flat python: \(expectedFlat.debugDescription)")
+                        print("  flat swift:  \(flat.debugDescription)")
+                    }
+                    if wantsLayout != (layoutRaw != nil) { print("  layout gate differs (swift: \(wantsLayout))") }
+                }
+            }
+        }
+        print("\(matched)/\(total) match")
+        fflush(stdout)
+        return total > 0 && matched == total
+    }
+
+    static func dumpPrompts() {
+        let object: [String: Any] = [
+            "SYSTEM": CleanupPrompts.system,
+            "SHOTS": CleanupPrompts.shots.map { [$0.user, $0.assistant] },
+            "LAYOUT_SYSTEM": CleanupPrompts.layoutSystem,
+            "LAYOUT_SHOTS": CleanupPrompts.layoutShots.map { [$0.user, $0.assistant] },
+        ]
+        if let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) {
+            FileHandle.standardOutput.write(data)
+            print()
+        }
+    }
+}
+
+/// `UFlow --cleanup-run <e2b|e4b|e12b> <out.json> <cases.json>…` runs every
+/// case's "said" text through the real in-app clean-up (llama.cpp model +
+/// Swift guard, exactly as a dictation would) and writes the results for
+/// tools/cleanup-eval/grade_app.py to grade with guard.py's own `grade()`.
+enum CleanupRun {
+    static func run(_ args: [String]) {
+        guard args.count >= 3, let model = CleanupModel(rawValue: args[0]) else {
+            print("usage: --cleanup-run <e2b|e4b|e12b> <out.json> <cases.json>…")
+            NSApp.terminate(nil); return
+        }
+        Task.detached {
+            let llm = LocalLLM(model: model)
+            guard llm.isDownloaded, await llm.loadNow() else {
+                print("model \(model.rawValue) is not downloaded or failed to load")
+                await MainActor.run { NSApp.terminate(nil) }; return
+            }
+            let cleaner = TextCleaner(llm: llm)
+            var rows: [[String: Any]] = []
+            for path in args.dropFirst(2) {
+                guard let data = FileManager.default.contents(atPath: path),
+                      let cases = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+                    print("cannot read \(path)"); continue
+                }
+                for c in cases {
+                    guard let said = c["said"] as? String else { continue }
+                    let started = ContinuousClock.now
+                    let final = await cleaner.clean(said)
+                    let d = ContinuousClock.now - started
+                    var row = c
+                    row["final"] = final
+                    row["set"] = (path as NSString).lastPathComponent
+                    row["ms"] = Int(d.components.seconds * 1000 + d.components.attoseconds / 1_000_000_000_000_000)
+                    rows.append(row)
+                }
+            }
+            if let out = try? JSONSerialization.data(withJSONObject: rows, options: [.prettyPrinted]) {
+                FileManager.default.createFile(atPath: args[1], contents: out)
+            }
+            print("\(rows.count) cases → \(args[1])")
+            llm.freeNow()
+            await MainActor.run { NSApp.terminate(nil) }
+        }
+    }
+}
+
+/// `UFlow --llm <e2b|e4b|e12b> "<text>"… [--wav <file.wav>]` loads that
+/// clean-up model (downloading it first if it is missing), runs each text
+/// through one generation with a trivial prompt, and prints the reply, load
+/// and generation times and memory, then unloads and loads again (warm).
+/// With `--wav`, Whisper (banglish) transcribes the file in the same process
+/// before and while the model is loaded: two ggml copies side by side.
+///
+/// Other modes (debug builds only):
+///   --prompt p.json --cases c.json   a real prompt over many dictations, timed
+///   --wait-pressure <s>              unload on memory pressure (else simulated)
+///   --cancel-after <s>               start the download, press Cancel
+///   --delete                         remove the model file
+/// Point UFLOW_STORE_DIR somewhere disposable for the last two.
+enum LLMCheck {
+    static let system = "Add punctuation. Output only the text."
+
+    @MainActor static func run(_ arguments: [String]) {
+        var args = arguments
+        func option(_ name: String) -> String? {
+            guard let flag = args.firstIndex(of: name), flag + 1 < args.count else { return nil }
+            defer { args.removeSubrange(flag...(flag + 1)) }
+            return args[flag + 1]
+        }
+        let wav = option("--wav")
+        let promptFile = option("--prompt")
+        let casesFile = option("--cases")
+        guard let name = args.first, let model = CleanupModel(rawValue: name) else {
+            print("usage: --llm <e2b|e4b|e12b> \"text\"… [--wav file.wav] [--prompt p.json --cases c.json]")
+            NSApp.terminate(nil)
+            return
+        }
+        if let after = option("--cancel-after").flatMap(Double.init) {
+            // Starts the download and presses Cancel after `after` seconds.
+            Task {
+                let llm = LocalLLM(model: model)
+                let fraction = LastValue(0.0)
+                let download = Task { try await llm.prepare { _ = fraction.swap($0) } }
+                try? await Task.sleep(for: .seconds(after))
+                llm.cancelDownload()
+                let started = ContinuousClock.now
+                let outcome: String
+                do { try await download.value; outcome = "finished?!" } catch { outcome = "\(type(of: error))" }
+                print("cancelled at \(Int(fraction.swap(0) * 1000) / 10)% → \(outcome) after \(seconds(since: started)); "
+                      + "downloaded=\(model.isDownloaded) bytes on disk=\(model.downloadedBytes)")
+                NSApp.terminate(nil)
+            }
+            return
+        }
+        if args.contains("--verify") {
+            Task {
+                let llm = LocalLLM(model: model)
+                let started = ContinuousClock.now
+                let ok = await llm.verifyInstalled()
+                print("sha256 \(ok ? "OK" : "MISMATCH") in \(seconds(since: started)); memory: \(memory())")
+                NSApp.terminate(nil)
+            }
+            return
+        }
+        if args.contains("--delete") {
+            let llm = LocalLLM(model: model)
+            print("before: downloaded=\(llm.isDownloaded) bytes=\(llm.downloadedBytes)")
+            do { try llm.delete() } catch { print("delete ERROR \(error.localizedDescription)") }
+            print("after: downloaded=\(llm.isDownloaded) bytes=\(llm.downloadedBytes)")
+            NSApp.terminate(nil)
+            return
+        }
+        if let wait = option("--wait-pressure").flatMap(Double.init) {
+            // Loads, then waits for a memory-pressure event to unload it
+            // (simulate one with `memory_pressure -S -l warn`).
+            Task {
+                let llm = LocalLLM(model: model)
+                guard await llm.loadNow() else { print("load FAILED"); NSApp.terminate(nil); return }
+                print("loaded; waiting up to \(Int(wait)) s for memory pressure (shouldSkip=\(llm.shouldSkip))")
+                fflush(stdout)
+                let started = ContinuousClock.now
+                while llm.isLoaded, ContinuousClock.now - started < .seconds(wait) {
+                    try? await Task.sleep(for: .milliseconds(100))
+                }
+                print(llm.isLoaded ? "still loaded" : "unloaded after \(seconds(since: started)); shouldSkip=\(llm.shouldSkip)")
+                if llm.isLoaded {
+                    // Mid-generation, as the worst case: it must stop and unload.
+                    let generating = Task {
+                        await llm.generate(system: system, user: String(repeating: "and then we talked some more ", count: 40),
+                                           timeout: .seconds(30))
+                    }
+                    try? await Task.sleep(for: .milliseconds(300))
+                    let fired = ContinuousClock.now
+                    llm.simulateMemoryPressure()
+                    let reply = await generating.value
+                    print("simulated pressure mid-generation → reply \(reply.debugDescription) after \(seconds(since: fired)); "
+                          + "loaded=\(llm.isLoaded) shouldSkip=\(llm.shouldSkip)")
+                }
+                let reply = await llm.generate(system: system, user: "hello there how are you", timeout: .seconds(30))
+                print("generate afterwards (reloads): \(reply.debugDescription)")
+                withExtendedLifetime(llm) { NSApp.terminate(nil) }
+            }
+            return
+        }
+        if let promptFile, let casesFile {
+            Task {
+                await evaluate(model: model, prompt: URL(filePath: promptFile), cases: URL(filePath: casesFile))
+                NSApp.terminate(nil)
+            }
+            return
+        }
+        let texts = args.dropFirst().isEmpty
+            ? ["so i was thinking we could meet tomorrow at the office around ten and go over the budget numbers before the call"]
+            : Array(args.dropFirst())
+        Task {
+            // The engines must outlive terminate: their willTerminate
+            // observers free the models before ggml's exit-time assert.
+            let engines = await check(model: model, texts: texts, wav: wav)
+            withExtendedLifetime(engines) { NSApp.terminate(nil) }
+        }
+    }
+
+    private static func check(model: CleanupModel, texts: [String], wav: String?) async -> [AnyObject] {
+        print("this Mac: \(ProcessInfo.processInfo.physicalMemory >> 30) GiB → forThisMac() = \(CleanupModel.forThisMac().rawValue)")
+        print("model: \(model.displayName)  \(model.fileURL.path)  downloaded=\(model.isDownloaded) (\(model.downloadedBytes) bytes)")
+        print("memory at start: \(memory())")
+        let speech = wav == nil ? nil : SpeechEngine()
+        if let speech, let wav {
+            await speech.setLanguage(.banglish)
+            do {
+                try await speech.prepare()
+                let text = try await speech.transcribe(file: URL(filePath: wav))
+                print("whisper (before llama): \(text.debugDescription)   memory: \(memory())")
+            } catch {
+                print("whisper ERROR \(error.localizedDescription)")
+            }
+        }
+
+        let llm = LocalLLM(model: model)
+        let engines: [AnyObject] = [llm] + (speech.map { [$0] } ?? [])
+        if !model.isDownloaded {
+            let started = ContinuousClock.now
+            let last = LastValue(-1)
+            do {
+                try await llm.prepare { fraction in
+                    let percent = Int(fraction * 100)
+                    if last.swap(percent) != percent, percent % 5 == 0 { print("  download \(percent)%"); fflush(stdout) }
+                }
+                print("downloaded + verified in \(seconds(since: started))")
+            } catch {
+                print("download ERROR \(error.localizedDescription)")
+                return engines
+            }
+        }
+        print("shouldSkip: \(llm.shouldSkip)")
+
+        var started = ContinuousClock.now
+        guard await llm.loadNow() else { print("load FAILED"); return engines }
+        print("load #1: \(seconds(since: started))  gpu=\(llm.usesGPU)  memory: \(memory())")
+        print(llm.promptCheck(system: system, user: texts[0]))
+
+        for round in 1...2 {
+            for text in texts {
+                started = ContinuousClock.now
+                let reply = await llm.generate(system: system, user: text, timeout: .seconds(30))
+                let stats = llm.lastStats
+                print("""
+                [round \(round)] \(text.split(separator: " ").count) words → \(seconds(since: started)) \
+                (prompt \(stats.promptTokens) tok, \(stats.reusedTokens) reused, \(Int(stats.promptMs)) ms; \
+                generated \(stats.generatedTokens) tok, \(Int(stats.generateMs)) ms)
+                  → \(reply.debugDescription)
+                """)
+                fflush(stdout)
+            }
+        }
+        print("memory while loaded: \(memory())")
+
+        // A timeout must come back as nil, promptly.
+        started = ContinuousClock.now
+        let timedOut = await llm.generate(system: system, user: texts[0], timeout: .milliseconds(150))
+        print("150 ms timeout → \(timedOut.debugDescription) after \(seconds(since: started))")
+
+        if let speech, let wav {
+            do {
+                let text = try await speech.transcribe(file: URL(filePath: wav))
+                print("whisper (llama loaded): \(text.debugDescription)   memory: \(memory())")
+            } catch {
+                print("whisper ERROR \(error.localizedDescription)")
+            }
+        }
+
+        llm.freeNow()
+        print("after unload: loaded=\(llm.isLoaded)  memory: \(memory())")
+        started = ContinuousClock.now
+        _ = await llm.loadNow()
+        print("load #2 (warm): \(seconds(since: started))  memory: \(memory())")
+        started = ContinuousClock.now
+        let again = await llm.generate(system: system, user: texts[0], timeout: .seconds(30))
+        print("first generation after reload: \(seconds(since: started)) → \(again.debugDescription)")
+        print("memory at end: \(memory())")
+        return engines
+    }
+
+    /// `--prompt {system, shots: [{user, assistant}]}` and `--cases [{said, raw?}]`:
+    /// a realistic prompt over many dictations. Prints each reply and its time,
+    /// and how many first lines equal `raw` (a reference model's output).
+    private static func evaluate(model: CleanupModel, prompt: URL, cases: URL) async {
+        struct Prompt: Decodable { struct Shot: Decodable { let user, assistant: String }; let system: String; let shots: [Shot] }
+        struct Case: Decodable { let said: String; let raw: String? }
+        guard let p = try? JSONDecoder().decode(Prompt.self, from: Data(contentsOf: prompt)),
+              let list = try? JSONDecoder().decode([Case].self, from: Data(contentsOf: cases)) else {
+            print("cannot read --prompt / --cases"); return
+        }
+        let shots = p.shots.map { (user: $0.user, assistant: $0.assistant) }
+        let llm = LocalLLM(model: model)
+        var started = ContinuousClock.now
+        guard await llm.loadNow() else { print("load FAILED"); return }
+        print("\(model.displayName): load \(seconds(since: started)), memory: \(memory())")
+        var times: [Double] = [], same = 0, compared = 0, failed = 0
+        for (i, c) in list.enumerated() {
+            started = ContinuousClock.now
+            let reply = await llm.generate(system: p.system, shots: shots, user: c.said, timeout: .seconds(30))
+            let ms = Double((ContinuousClock.now - started) / .microseconds(1)) / 1000
+            times.append(ms)
+            let stats = llm.lastStats
+            let first = reply.map { String($0.split(separator: "\n", omittingEmptySubsequences: true).first ?? "") }
+            if reply == nil { failed += 1 }
+            if let raw = c.raw { compared += 1; if first == raw { same += 1 } }
+            print("\(i + 1)\t\(Int(ms)) ms\tprompt \(stats.promptTokens) (\(stats.reusedTokens) reused) gen \(stats.generatedTokens)\t"
+                  + "\(first == c.raw ? "=" : "≠")\t\(first ?? "nil")")
+            fflush(stdout)
+        }
+        let sorted = times.sorted()
+        func pct(_ q: Double) -> Int { Int(sorted[min(sorted.count - 1, Int(Double(sorted.count) * q))]) }
+        print("\(list.count) cases: first \(Int(times[0])) ms, median \(pct(0.5)) ms, p90 \(pct(0.9)) ms, max \(Int(sorted.last!)) ms; "
+              + "nil \(failed); first line == reference \(same)/\(compared)")
+        print("memory: \(memory())")
+    }
+
+    private static func seconds(since start: ContinuousClock.Instant) -> String {
+        String(format: "%.0f ms", Double((ContinuousClock.now - start) / .microseconds(1)) / 1000)
+    }
+
+    /// phys_footprint (what Activity Monitor calls Memory; excludes clean
+    /// mmapped file pages), its peak, and resident size (includes them).
+    private static func memory() -> String {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else { return "?" }
+        func mb(_ bytes: UInt64) -> String { "\(bytes >> 20) MB" }
+        return "footprint \(mb(info.phys_footprint)) (peak \(mb(UInt64(info.ledger_phys_footprint_peak)))), resident \(mb(info.resident_size))"
+    }
+}
+
+/// Lock-protected value for the download progress callback.
+private final class LastValue<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Value
+    init(_ value: Value) { self.value = value }
+    func swap(_ new: Value) -> Value { lock.withLock { defer { value = new }; return value } }
 }
 #endif

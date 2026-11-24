@@ -48,6 +48,7 @@ struct SettingsView: View {
             } footer: {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(app.settings.effectiveHotkeyMode.detail + " Works in any app; the text is typed where you were.")
+                    Text("\(GlobalShortcut.Combo.pasteLast.symbol) pastes your last dictation again, if a paste didn't land.")
                     if app.settings.triggerKeyCode == nil {
                         Text("A modifier alone always holds — as a toggle it would fire on every incidental tap.")
                         if app.settings.modifierKeyCode == kVK_Function {
@@ -96,6 +97,8 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            CleanupSection(cleanup: app.cleanup)
+
             Section {
                 Picker("Appearance", selection: Binding(
                     get: { app.settings.appearance },
@@ -139,10 +142,78 @@ struct SettingsView: View {
                 Text("\(app.dictionary.entries.count) entries. Edit the file in any text editor — UFlow re-reads it when you come back.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
+
+                Toggle("Learn from my corrections", isOn: Binding(
+                    get: { app.settings.learnFromCorrections },
+                    set: { app.settings.learnFromCorrections = $0 }
+                ))
+                Text("When you fix a word UFlow misheard right after dictating — \u{201C}cloud code\u{201D} to \u{201C}Claude Code\u{201D} — it suggests a correction in the Dictionary tab for you to add or dismiss. To spot the fix it reads the text field once after pasting and again about 25 seconds later, or when you next dictate. Only the corrected word pairs are kept, never the text around them, and nothing leaves your Mac. Password fields are never read. Uses the Accessibility permission.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
-        .frame(width: 460)
-        .fixedSize(horizontal: false, vertical: true)
+        // Fixed height, scrolling: the full form is taller than a laptop
+        // screen, and a window sized to fit it left the bottom unreachable.
+        .frame(width: 460, height: 640)
+    }
+}
+
+/// Settings → Clean-up: the one model this Mac's memory suits, and its download.
+private struct CleanupSection: View {
+    @EnvironmentObject private var app: AppState
+    @ObservedObject var cleanup: CleanupController
+
+    var body: some View {
+        Section {
+            Toggle("Clean up what I say", isOn: Binding(
+                // Shown off until the model is installed: it can't run before.
+                get: { app.settings.cleanupEnabled && cleanup.isReady },
+                set: { app.settings.cleanupEnabled = $0 }
+            ))
+            .disabled(!cleanup.isReady)
+
+            LabeledContent("Model") {
+                Text("\(cleanup.model.displayName) · \(cleanup.sizeText)")
+                    .monospacedDigit()
+            }
+
+            switch cleanup.phase {
+            case .notDownloaded:
+                LabeledContent("Status") {
+                    Button("Download") { cleanup.startDownload() }
+                }
+            case .downloading(let fraction):
+                LabeledContent("Downloading") {
+                    HStack(spacing: 8) {
+                        ProgressView(value: fraction).frame(width: 140)
+                        Text("\(Int(fraction * 100))%").monospacedDigit().foregroundStyle(.secondary)
+                        Button("Cancel") { cleanup.cancelDownload() }
+                    }
+                }
+            case .ready:
+                LabeledContent("Status") {
+                    HStack(spacing: 8) {
+                        Text("Installed").foregroundStyle(Tok.C.accent)
+                        Button("Remove") { cleanup.remove() }
+                    }
+                }
+            case .failed(let reason):
+                LabeledContent("Status") {
+                    Button("Try again") { cleanup.startDownload() }
+                }
+                Text(reason)
+                    .font(.callout)
+                    .foregroundStyle(.red)
+            }
+        } header: {
+            Text("Clean-up")
+        } footer: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Removes stutters, false starts and corrected slips (\u{201C}at five, no sorry, six\u{201D} → \u{201C}at six\u{201D}), adds punctuation, and turns spoken lists into numbered ones. It only ever deletes words it can prove were slips — anything else stays exactly as you said it.")
+                Text("Runs on your Mac. Picked for your \(cleanup.memoryText) of memory: 8 GB Macs get Gemma 4 E2B, 16 GB get E4B, 18 GB and up get 12B. Downloaded once from Hugging Face and checked; it loads while you talk and unloads when idle or when memory runs low.")
+            }
+            .foregroundStyle(.secondary)
+        }
     }
 }

@@ -13,6 +13,7 @@ import ServiceManagement
 ///     ~/Library/Application Support/UFlow/
 ///         dictionary.txt      plain text, hand-editable
 ///         transcripts.json    history
+///         suggestions.json    proposed fixes from your corrections (word pairs only)
 enum Store {
     static let directory: URL = {
         // A snapshot or test run points this somewhere disposable so it can
@@ -26,6 +27,7 @@ enum Store {
 
     static var dictionaryFile: URL { directory.appendingPathComponent("dictionary.txt") }
     static var transcriptsFile: URL { directory.appendingPathComponent("transcripts.json") }
+    static var suggestionsFile: URL { directory.appendingPathComponent("suggestions.json") }
 
     static func reveal(_ url: URL) {
         NSWorkspace.shared.activateFileViewerSelecting([url])
@@ -362,6 +364,96 @@ final class TranscriptStore: ObservableObject {
 }
 
 // =============================================================================
+// MARK: - Suggestions from corrections
+// =============================================================================
+
+/// A dictionary fix proposed because the user corrected a dictation by hand.
+/// Only the word pair is kept — never the text it was found in.
+struct CorrectionSuggestion: Identifiable, Hashable, Codable {
+    var id = UUID()
+    var heard: String
+    var written: String
+    var date: Date
+    /// How many dictations the same correction turned up in.
+    var count = 1
+
+    var key: String { Self.key(heard: heard, written: written) }
+    static func key(heard: String, written: String) -> String { "\(heard.lowercased())\u{1F}\(written)" }
+}
+
+/// Proposed fixes waiting for Add or Dismiss in the Dictionary tab. Nothing is
+/// added to the dictionary without the user's say-so: a misread correction
+/// would otherwise rewrite their dictations silently, forever.
+@MainActor
+final class SuggestionStore: ObservableObject {
+    @Published private(set) var suggestions: [CorrectionSuggestion] = []
+    /// Dismissed pairs, so the same correction isn't proposed again.
+    private var dismissed: [String] = []
+
+    private static let cap = 50
+    private static let dismissedCap = 500
+
+    private struct File: Codable {
+        var suggestions: [CorrectionSuggestion]
+        var dismissed: [String]
+    }
+
+    init() { load() }
+
+    /// Adds fixes the dictionary doesn't already make. A repeat moves to the
+    /// top with its count raised: seen twice is a stronger case than once.
+    func record(_ fixes: [LearnedFix], ruleset: CorrectionEngine.Ruleset) {
+        var changed = false
+        for fix in fixes {
+            let key = CorrectionSuggestion.key(heard: fix.heard, written: fix.written)
+            guard !dismissed.contains(key),
+                  CorrectionEngine.apply(ruleset, to: fix.heard).text != fix.written else { continue }
+            if let index = suggestions.firstIndex(where: { $0.key == key }) {
+                var existing = suggestions.remove(at: index)
+                existing.count += 1
+                existing.date = .now
+                suggestions.insert(existing, at: 0)
+            } else {
+                suggestions.insert(CorrectionSuggestion(heard: fix.heard, written: fix.written, date: .now), at: 0)
+            }
+            changed = true
+        }
+        guard changed else { return }
+        if suggestions.count > Self.cap { suggestions.removeLast(suggestions.count - Self.cap) }
+        save()
+    }
+
+    /// Removes a suggestion that was turned into a dictionary entry.
+    func remove(_ suggestion: CorrectionSuggestion) {
+        suggestions.removeAll { $0.id == suggestion.id }
+        save()
+    }
+
+    func dismiss(_ suggestion: CorrectionSuggestion) {
+        suggestions.removeAll { $0.id == suggestion.id }
+        dismissed.append(suggestion.key)
+        if dismissed.count > Self.dismissedCap { dismissed.removeFirst(dismissed.count - Self.dismissedCap) }
+        save()
+    }
+
+    private func load() {
+        guard let data = try? Data(contentsOf: Store.suggestionsFile),
+              let file = try? JSONDecoder().decode(File.self, from: data) else { return }
+        suggestions = file.suggestions
+        dismissed = file.dismissed
+    }
+
+    private func save() {
+        do {
+            let data = try JSONEncoder().encode(File(suggestions: suggestions, dismissed: dismissed))
+            try data.write(to: Store.suggestionsFile, options: .atomic)
+        } catch {
+            Log.app.error("Could not write suggestions.json: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+}
+
+// =============================================================================
 // MARK: - Settings
 // =============================================================================
 
@@ -436,6 +528,8 @@ final class AppSettings: ObservableObject {
         static let menuBar = "ui.menuBarItem"
         static let appearance = "ui.appearance"
         static let launchAtLogin = "ui.launchAtLogin"
+        static let learnFromCorrections = "dictionary.learnFromCorrections"
+        static let cleanupEnabled = "cleanup.enabled"
     }
 
     private let defaults = UserDefaults.standard
@@ -459,6 +553,18 @@ final class AppSettings: ObservableObject {
     @Published var backend: BackendPreference { didSet { defaults.set(backend.rawValue, forKey: Key.backend) } }
     @Published var language: SpeechLanguage { didSet { defaults.set(language.rawValue, forKey: Key.language) } }
     @Published var showMenuBarItem: Bool { didSet { defaults.set(showMenuBarItem, forKey: Key.menuBar) } }
+
+    /// Opt-in, off by default: it reads the text field a dictation went into
+    /// (once after the paste, once after the user had time to fix it).
+    @Published var learnFromCorrections: Bool {
+        didSet { defaults.set(learnFromCorrections, forKey: Key.learnFromCorrections) }
+    }
+
+    /// On-device clean-up (stutters, restarts, punctuation, lists). On by
+    /// default, but it does nothing until the model is downloaded in Settings.
+    @Published var cleanupEnabled: Bool {
+        didSet { defaults.set(cleanupEnabled, forKey: Key.cleanupEnabled) }
+    }
 
     @Published var appearance: AppearancePreference {
         didSet {
@@ -494,6 +600,8 @@ final class AppSettings: ObservableObject {
         language = (defaults.string(forKey: Key.language).flatMap(SpeechLanguage.init(rawValue:))) ?? .english
         soundEnabled = defaults.object(forKey: Key.sound) as? Bool ?? true
         showMenuBarItem = defaults.object(forKey: Key.menuBar) as? Bool ?? true
+        learnFromCorrections = defaults.object(forKey: Key.learnFromCorrections) as? Bool ?? false
+        cleanupEnabled = defaults.object(forKey: Key.cleanupEnabled) as? Bool ?? true
         launchAtLogin = defaults.object(forKey: Key.launchAtLogin) as? Bool ?? true
         appearance = (defaults.string(forKey: Key.appearance)
             .flatMap(AppearancePreference.init(rawValue:))) ?? .system

@@ -1,4 +1,6 @@
 import AVFAudio
+import AppKit
+import CoreAudio
 import CoreMedia
 import Foundation
 import Speech
@@ -80,20 +82,43 @@ final class TranscriptAccumulator: @unchecked Sendable {
     /// Finalized words with the model's confidence in each.
     func words() -> [AppleWord] { lock.withLock { finalizedWords } }
 
-    /// Assembled transcript from finalized results only. Chunks concatenate
-    /// verbatim — Apple's result texts are designed to join seamlessly, and
-    /// forcing separators between them corrupts word/punctuation boundaries.
+    /// Assembled transcript from finalized results only.
     func finalText() -> String {
         lock.lock()
         defer { lock.unlock() }
-        return Self.normalize(finalizedParts.joined())
+        return Self.normalize(Self.join(finalizedParts))
     }
 
     /// Live view (finalized + volatile) — usable for HUD previews; never injected.
     func currentText() -> String {
         lock.lock()
         defer { lock.unlock() }
-        return Self.normalize((finalizedParts + [volatileTail]).joined())
+        return Self.normalize(Self.join(finalizedParts + [volatileTail]))
+    }
+
+    /// Joins Apple's result chunks. Most carry their own leading space, but a
+    /// chunk that starts after a pause often doesn't, and plain concatenation
+    /// typed "something elseSo," and "detect that?Problem". A space goes in
+    /// wherever two words meet (letter or digit on both sides, or the end of a
+    /// clause before one) — never before punctuation (", " / "'s"), which is
+    /// why a blanket separator corrupts boundaries, and never between digits.
+    static func join(_ parts: [String]) -> String {
+        var out = ""
+        for part in parts {
+            if let last = out.last, let first = part.first,
+               !last.isWhitespace, !first.isWhitespace,
+               first.isLetter || first.isNumber {
+                // Digits touching digits are one number. A digit after ". , :"
+                // is not: Apple splits results at pauses, so "5." + "10 more"
+                // is two sentences far more often than "3." + "14" is a number.
+                let insideNumber = first.isNumber && last.isNumber
+                if !insideNumber, last.isLetter || last.isNumber || ".!?,;:".contains(last) {
+                    out += " "
+                }
+            }
+            out += part
+        }
+        return out
     }
 
     /// Deterministic cleanup only: trim, collapse runs of whitespace, drop
@@ -256,7 +281,7 @@ actor SpeechEngine {
     /// Live per-session state.
     private struct ActiveSession {
         let analyzer: SpeechAnalyzer
-        let audioEngine: AVAudioEngine
+        let capture: MicCapture
         let inputContinuation: AsyncStream<AnalyzerInput>.Continuation
         let consumerTask: Task<Void, Never>
         let accumulator: TranscriptAccumulator
@@ -277,10 +302,89 @@ actor SpeechEngine {
 
     /// English + Banglish: record while held, transcribe once on release.
     private struct WhisperSession {
-        let audioEngine: AVAudioEngine
+        let capture: MicCapture
         let collector: SampleCollector
         let language: SpeechLanguage
     }
+
+    /// The microphone, started at key-down before the hold is confirmed, so
+    /// the first words are not lost. A hold takes it over; a tap discards it.
+    private var armed: MicCapture?
+
+    /// Starts capture ahead of a likely session (Fn went down). Idempotent.
+    /// ponytail: a capture nobody claims is stopped after `armTimeout`, so a
+    /// lost key-up can never leave the microphone on.
+    func armMicrophone(token: Int) {
+        // A disarm for this press (or a later one) already arrived: the arm
+        // lost the race to the actor and must not open the mic.
+        guard token > disarmedThrough else { return }
+        guard armed == nil, activeSession == nil, whisperSession == nil else { return }
+        // A Bluetooth headset's mic is not opened speculatively: opening it
+        // switches AirPods & co. from music quality to call quality, which
+        // must not happen for a press that might be a tap. Those dictations
+        // start the mic at hold confirmation, as before.
+        if Self.defaultInputIsBluetooth() {
+            Log.speech.info("Bluetooth input — no pre-roll")
+            return
+        }
+        do {
+            let capture = try MicCapture()
+            armed = capture
+            Task { [weak self] in
+                try? await Task.sleep(for: Self.armTimeout)
+                await self?.disarm(ifStill: capture)
+            }
+        } catch {
+            Log.speech.error("Pre-roll capture failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// The press was a tap, or the session never started: drop the audio.
+    /// `token`: arms carrying a token up to this one are void from now on.
+    func disarmMicrophone(token: Int = 0) {
+        disarmedThrough = max(disarmedThrough, token)
+        armed?.stop()
+        armed = nil
+    }
+    private var disarmedThrough = 0
+
+    private func disarm(ifStill capture: MicCapture) {
+        guard armed === capture else { return }
+        Log.speech.info("Pre-roll capture unclaimed — stopping microphone")
+        disarmMicrophone()
+    }
+
+    private static let armTimeout: Duration = .seconds(5)
+
+    /// Whether the system's default input device is a Bluetooth one.
+    static func defaultInputIsBluetooth() -> Bool {
+        var device = AudioDeviceID(0)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultInputDevice,
+                                                 mScope: kAudioObjectPropertyScopeGlobal,
+                                                 mElement: kAudioObjectPropertyElementMain)
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &device) == noErr
+        else { return false }
+        var transport = UInt32(0)
+        size = UInt32(MemoryLayout<UInt32>.size)
+        address.mSelector = kAudioDevicePropertyTransportType
+        guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, &transport) == noErr else { return false }
+        return transport == kAudioDeviceTransportTypeBluetooth || transport == kAudioDeviceTransportTypeBluetoothLE
+    }
+
+    /// The armed capture if there is one, else a fresh one.
+    private func takeCapture() throws -> MicCapture {
+        if let capture = armed {
+            armed = nil
+            // Armed for this press moments ago (~0.2–0.4 s): use it. Older
+            // means it was armed for something else; its buffered audio
+            // predates this recording, so start clean.
+            if ContinuousClock.now - capture.startedAt < Self.freshArm { return capture }
+            capture.stop()
+        }
+        return try MicCapture()
+    }
+    private static let freshArm: Duration = .milliseconds(1500)
     private let banglaWhisper = WhisperEngine(model: .bangla)
     private let banglishWhisper = WhisperEngine(model: .banglish)
     /// The Whisper model for the current mode.
@@ -486,16 +590,18 @@ actor SpeechEngine {
             }
             collector = SampleCollector()
         }
+        // Clicks noted for an earlier attempt that never recorded are stale.
+        cues.removeAll { ContinuousClock.now - $0 > .seconds(2) }
+        // The microphone first (usually already running since key-down):
+        // everything below takes time, and speech that arrives meanwhile
+        // waits in the capture instead of being lost.
+        let capture = try takeCapture()
+        var started = false
+        defer { if !started { capture.stop() } }
+        let hardwareFormat = capture.format
+
         let backend = try makeBackend()
         let modules = backend.modules
-
-        // Hardware input format (mic permission is verified upstream in AppState).
-        let audioEngine = AVAudioEngine()
-        let inputNode = audioEngine.inputNode
-        let hardwareFormat = inputNode.inputFormat(forBus: 0)
-        guard hardwareFormat.sampleRate > 0, hardwareFormat.channelCount > 0 else {
-            throw SpeechEngineError.microphoneFormatUnavailable
-        }
 
         // Target format requested by the analyzer; convert when necessary.
         let targetFormat = await SpeechAnalyzer.bestAvailableAudioFormat(
@@ -556,7 +662,8 @@ actor SpeechEngine {
 
         // Lightweight realtime tap: convert the buffer and yield it onward.
         let counter = YieldCounter()
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: hardwareFormat) { buffer, _ in
+        // Audio captured before this point is replayed first, in order.
+        capture.attach { buffer in
             onLevel?(Self.normalizedLevel(of: buffer))
             if let collector, let mono = Self.converted(buffer, with: whisperConverter, to: whisperFormat),
                let channel = mono.floatChannelData?[0] {
@@ -566,20 +673,11 @@ actor SpeechEngine {
             counter.count += 1
             continuation.yield(AnalyzerInput(buffer: output))
         }
-
-        do {
-            audioEngine.prepare()
-            try audioEngine.start()
-        } catch {
-            inputNode.removeTap(onBus: 0)
-            continuation.finish()
-            consumerTask.cancel()
-            throw SpeechEngineError.audioStartFailed(error.localizedDescription)
-        }
+        started = true
 
         activeSession = ActiveSession(
             analyzer: analyzer,
-            audioEngine: audioEngine,
+            capture: capture,
             inputContinuation: continuation,
             consumerTask: consumerTask,
             accumulator: accumulator,
@@ -595,6 +693,13 @@ actor SpeechEngine {
     /// transcript, and tears the session down. Returns the final text (possibly
     /// empty — callers decide what to do with that).
     func stopRecordingAndCollect() async -> String {
+        let mode = whisperSession?.language ?? activeSession?.language ?? language
+        return await finish(await collectScript(), mode: mode)
+    }
+
+    /// The transcript in the script it was spoken in (Bangla stays Bangla
+    /// script); romanizing for Banglish happens in `finish`, after clean-up.
+    private func collectScript() async -> String {
         if let session = whisperSession { return await stopWhisperRecording(session) }
         guard let session = activeSession else { return "" }
         guard let collector = session.collector else { return await finishApple(session).text }
@@ -602,11 +707,12 @@ actor SpeechEngine {
         // Bangla modes: Whisper starts on the recording while Apple finalizes.
         // Apple is done first; when it is sure the speech was English its text
         // goes out without waiting for Whisper.
-        session.audioEngine.inputNode.removeTap(onBus: 0)
-        session.audioEngine.stop()
+        session.capture.stop()
         let samples = collector.drain()
         let mode = session.language
-        let whisperTask = Task { await self.transcribeWhisper(samples, mode: mode) }
+        let cue = cueRanges(in: session.capture)
+        cues = []
+        let whisperTask = Task { await self.transcribeWhisper(samples, mode: mode, ignoring: cue) }
         return await pick(english: await finishApple(session), whisper: whisperTask, mode: mode)
     }
 
@@ -620,7 +726,49 @@ actor SpeechEngine {
             Log.speech.info("Routed to Apple (confidence \(confidence, privacy: .public))")
             return english.text
         }
+        // Short replies ("no", "cool", "got it") get less confidence from
+        // Apple than sentences, and the Bangla model turns them into Bangla
+        // ("no" → "nao"). A lower bar is safe only when every word Apple
+        // heard is a real English word and none of them is a common Bangla
+        // word that also spells as English ("bolo", "ki").
+        if let confidence = english.confidence, confidence >= Self.shortEnglishConfidence,
+           await Self.isShortEnglish(english.text) {
+            whisper.cancel()
+            Log.speech.info("Routed to Apple: short English reply (confidence \(confidence, privacy: .public))")
+            return english.text
+        }
+        Log.speech.info("Routed to Whisper (Apple confidence \(english.confidence ?? -1, privacy: .public), \(english.words.count, privacy: .public) words)")
         return route(heard: await whisper.value, english: english, mode: mode)
+    }
+
+    /// The bar for 1–3 word replies that are all real English words.
+    /// Measured on 116 short clips (5 English voices incl. two Indian
+    /// English, 16 Bangla words): English that went astray 0.735–0.814
+    /// ("no", "wait", "cool"); Bangla read as real English words at most
+    /// 0.644 (নাও → "Now."; না → "No." 0.606). ponytail: synthetic voices —
+    /// recalibrate on real recordings if short Bangla replies turn English.
+    private static let shortEnglishConfidence = 0.70
+
+    /// Common Bangla words that macOS's English dictionary also accepts.
+    private static let banglaLookalikes: Set<String> = [
+        "bolo", "cholo", "ji", "jee", "g", "ki", "key", "he", "na", "nah", "ha", "haa", "hum", "hmm",
+        "to", "tho", "je", "jao", "khao", "dao", "nao", "aro", "shono", "dekho", "keno", "acha",
+    ]
+
+    /// 1–3 words, every one a real English word and none a Bangla lookalike.
+    @MainActor
+    static func isShortEnglish(_ text: String) -> Bool {
+        let words = text.split(whereSeparator: \.isWhitespace)
+            .map { $0.trimmingCharacters(in: .punctuationCharacters).lowercased() }
+            .filter { !$0.isEmpty }
+        guard (1...3).contains(words.count) else { return false }
+        let checker = NSSpellChecker.shared
+        return words.allSatisfy { word in
+            !banglaLookalikes.contains(word)
+                && word.unicodeScalars.allSatisfy { $0.isASCII }
+                && checker.checkSpelling(of: word, startingAt: 0, language: "en", wrap: false,
+                                         inSpellDocumentWithTag: 0, wordCount: nil).location == NSNotFound
+        }
     }
 
     /// Apple's mean word confidence that marks an utterance as English.
@@ -635,10 +783,35 @@ actor SpeechEngine {
     /// 31% WER on our English set). In a mixed sentence the English words
     /// take Apple's spelling one by one (`EnglishSpelling`).
     private func route(heard: String, english: AppleTranscript, mode: SpeechLanguage) -> String {
+        let out = routeChoice(heard: heard, english: english, mode: mode)
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["UFLOW_TRACE"] != nil {
+            FileHandle.standardError.write(Data("TRACE\tapple=\(english.text)\tconf=\(english.confidence.map { String(format: "%.3f", $0) } ?? "-")\twhisper=\(heard)\tout=\(out)\n".utf8))
+        }
+        #endif
+        return out
+    }
+
+    private func routeChoice(heard: String, english: AppleTranscript, mode: SpeechLanguage) -> String {
         let hasBangla = heard.unicodeScalars.contains { (0x0980...0x09FF).contains($0.value) }
         if !hasBangla, !english.text.isEmpty { return english.text }
-        let spelled = EnglishSpelling.apply(to: heard, apple: english.words)
-        return mode == .banglish ? BanglaRomanizer.apply(to: spelled) : spelled
+        return EnglishSpelling.apply(to: heard, apple: english.words)
+    }
+
+    /// Optional on-device clean-up (`TextCleaner`), set from Settings.
+    private var cleaner: TextCleaner?
+
+    func setCleaner(_ cleaner: TextCleaner?) { self.cleaner = cleaner }
+
+    /// Last steps on the spoken-script transcript: fillers out, then the
+    /// clean-up model (which works best on Bangla script, before
+    /// romanization, and never sees Banglish), then Banglish romanization.
+    private func finish(_ script: String, mode: SpeechLanguage) async -> String {
+        var text = script
+        if let cleaner, !text.isEmpty {
+            text = await cleaner.clean(FillerFilter.apply(to: text))
+        }
+        return mode == .banglish ? BanglaRomanizer.apply(to: text) : text
     }
 
     /// Stops Apple's analyzer and collects its final transcript and confidence.
@@ -652,8 +825,7 @@ actor SpeechEngine {
         let drainBudget = min(max(.seconds(6), elapsed), .seconds(60))
 
         // 1) Stop microphone capture immediately.
-        session.audioEngine.inputNode.removeTap(onBus: 0)
-        session.audioEngine.stop()
+        session.capture.stop()
 
         // 2) Tell the stream no more audio is coming.
         session.inputContinuation.finish()
@@ -723,15 +895,13 @@ actor SpeechEngine {
     /// accidental taps and unrecoverable errors.
     func cancelSession() async {
         if let session = whisperSession {
-            session.audioEngine.inputNode.removeTap(onBus: 0)
-            session.audioEngine.stop()
+            session.capture.stop()
             whisperSession = nil
             Log.speech.info("Session cancelled")
             return
         }
         guard let session = activeSession else { return }
-        session.audioEngine.inputNode.removeTap(onBus: 0)
-        session.audioEngine.stop()
+        session.capture.stop()
         session.inputContinuation.finish()
 
         let cancellationTask = Task { await session.analyzer.cancelAndFinishNow() }
@@ -753,59 +923,95 @@ actor SpeechEngine {
     // MARK: - Whisper session
 
     private func startWhisperRecording(onLevel: (@Sendable (Float) -> Void)?) throws {
-        let audioEngine = AVAudioEngine()
-        let inputNode = audioEngine.inputNode
-        let hardwareFormat = inputNode.inputFormat(forBus: 0)
-        guard hardwareFormat.sampleRate > 0, hardwareFormat.channelCount > 0,
-              let targetFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: WhisperEngine.sampleRate,
+        cues.removeAll { ContinuousClock.now - $0 > .seconds(2) }
+        let capture = try takeCapture()
+        let hardwareFormat = capture.format
+        guard let targetFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: WhisperEngine.sampleRate,
                                                channels: 1, interleaved: false)
-        else { throw SpeechEngineError.microphoneFormatUnavailable }
+        else { capture.stop(); throw SpeechEngineError.microphoneFormatUnavailable }
         let converter = targetFormat != hardwareFormat ? AVAudioConverter(from: hardwareFormat, to: targetFormat) : nil
 
         let collector = SampleCollector()
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: hardwareFormat) { buffer, _ in
+        capture.attach { buffer in
             onLevel?(Self.normalizedLevel(of: buffer))
             guard let output = Self.converted(buffer, with: converter, to: targetFormat),
                   let channel = output.floatChannelData?[0] else { return }
             collector.append(UnsafeBufferPointer(start: channel, count: Int(output.frameLength)))
         }
-        do {
-            audioEngine.prepare()
-            try audioEngine.start()
-        } catch {
-            inputNode.removeTap(onBus: 0)
-            throw SpeechEngineError.audioStartFailed(error.localizedDescription)
-        }
-        whisperSession = WhisperSession(audioEngine: audioEngine, collector: collector, language: language)
+        whisperSession = WhisperSession(capture: capture, collector: collector, language: language)
         Log.speech.info("Recording started")
     }
 
-    /// When even the loudest 100 ms of a clip is below this RMS, the clip is
-    /// room noise — and near-silence is exactly where Whisper invents text
-    /// ("Thank you."). About -55 dBFS. Judged on the loudest window, not the
-    /// whole clip, so a long hold with a short phrase in it still counts.
+    /// A 20 ms slice quieter than this RMS is room noise — and near-silence
+    /// is exactly where Whisper invents text ("Thank you."). About -55 dBFS.
     /// ponytail: calibration knob — lower it if a quiet mic gets skipped.
     private static let silenceRMS: Float = 0.0018
 
-    static func loudestWindowRMS(_ samples: [Float], window: Int = 1600) -> Float {
-        stride(from: 0, to: samples.count, by: window).reduce(Float(0)) { loudest, start in
-            let chunk = samples[start..<min(start + window, samples.count)]
-            return max(loudest, (chunk.reduce(0) { $0 + $1 * $1 } / Float(chunk.count)).squareRoot())
+    /// Less audible sound than this is not speech — about the old gate's
+    /// sensitivity (any 20 ms slice above room noise, three of them), so
+    /// even a quick "হ্যাঁ" (0.16 s) passes.
+    static let minimumAudibleSeconds = 0.06
+
+    /// How long after a click is played its sound can be in the recording:
+    /// the 80–120 ms cue plus output latency.
+    static let cueWindow = 0.25
+
+    /// Seconds of the clip that are louder than room noise, in 20 ms slices,
+    /// not counting `ignoring` (sample indices of the start click).
+    ///
+    /// Since the microphone starts at key-down, the start click (`SoundKit`
+    /// .recordDown) is recorded, and on its own Whisper turned it into
+    /// "taropore amader shows er shows er…" — so pressing Fn and saying
+    /// nothing typed garbage. Duration alone can't tell them apart (click
+    /// 0.12 s, a quick "হ্যাঁ" 0.16 s), but the app knows when it played the
+    /// click, so that stretch simply doesn't count as speech. The audio
+    /// itself is untouched: words said over the click still reach the model.
+    static func audibleSeconds(_ samples: [Float], ignoring: [Range<Int>] = [],
+                               sampleRate: Double = WhisperEngine.sampleRate) -> Double {
+        let window = max(1, Int(sampleRate * 0.02))
+        let loud = stride(from: 0, to: samples.count, by: window).filter { start in
+            let range = start..<min(start + window, samples.count)
+            if ignoring.contains(where: { $0.overlaps(range) }) { return false }
+            let chunk = samples[range]
+            return (chunk.reduce(0) { $0 + $1 * $1 } / Float(chunk.count)).squareRoot() >= silenceRMS
+        }.count
+        return Double(loud * window) / sampleRate
+    }
+
+    /// Where the app's own clicks fall in a recording made by `capture`.
+    private func cueRanges(in capture: MicCapture) -> [Range<Int>] {
+        let rate = WhisperEngine.sampleRate
+        return cues.compactMap { cue in
+            let d = cue - capture.startedAt
+            let offset = Double(d.components.seconds) + Double(d.components.attoseconds) / 1e18
+            let lower = max(0, Int((offset - 0.02) * rate))
+            let upper = Int((offset + Self.cueWindow) * rate)
+            guard upper > lower else { return nil }
+            Log.speech.info("Click at \(String(format: "%.2f", offset), privacy: .public) s into the recording; not counted as speech")
+            return lower..<upper
         }
     }
 
+    /// When the app played its record/stop clicks for the current session.
+    private var cues: [ContinuousClock.Instant] = []
+
+    /// AppState plays the clicks; the silence gate needs to know when.
+    func noteCue(at instant: ContinuousClock.Instant) { cues.append(instant) }
+
     private func stopWhisperRecording(_ session: WhisperSession) async -> String {
-        session.audioEngine.inputNode.removeTap(onBus: 0)
-        session.audioEngine.stop()
+        session.capture.stop()
         whisperSession = nil
-        let heard = await transcribeWhisper(session.collector.drain(), mode: session.language)
+        let cue = cueRanges(in: session.capture)
+        cues = []
+        let heard = await transcribeWhisper(session.collector.drain(), mode: session.language, ignoring: cue)
         return route(heard: heard, english: AppleTranscript(), mode: session.language)
     }
 
     /// Whisper's raw transcript of one recording, or "" for silence.
-    private func transcribeWhisper(_ samples: [Float], mode: SpeechLanguage) async -> String {
+    private func transcribeWhisper(_ samples: [Float], mode: SpeechLanguage, ignoring cue: [Range<Int>] = []) async -> String {
         Log.speech.info("Audio samples delivered to Whisper: \(samples.count, privacy: .public)")
-        guard samples.count >= Int(WhisperEngine.sampleRate * 0.3), Self.loudestWindowRMS(samples) >= Self.silenceRMS else {
+        guard samples.count >= Int(WhisperEngine.sampleRate * 0.3),
+              Self.audibleSeconds(samples, ignoring: cue) >= Self.minimumAudibleSeconds else {
             Log.speech.info("Too short or silent — nothing to transcribe")
             return ""
         }
@@ -897,6 +1103,142 @@ actor SpeechEngine {
 
 // MARK: - Audio tap helpers
 
+/// The microphone for one recording, startable before the recording exists.
+///
+/// Holding Fn alone waits `HotkeyManager.holdDelay` (300 ms) to tell a hold
+/// from a tap, and building the analyzer takes ~130 ms more. Starting the mic
+/// only after both lost the first word or two of every dictation ("use
+/// subagents" arrived as "pull agents"). So capture starts at key-down and
+/// buffers until a session `attach`es, which replays the buffered audio in
+/// order before going live — no gap, no reordering, because both happen under
+/// one lock that the tap thread also takes.
+///
+/// The microphone can also change mid-recording (AirPods connect, a USB mic
+/// is unplugged). macOS then stops the engine and every later word is lost
+/// silently. The capture restarts on the new device and converts its audio
+/// back to `format`, so the session's converters never see the change.
+final class MicCapture: @unchecked Sendable {
+    /// The format every delivered buffer has, for the capture's whole life.
+    let format: AVAudioFormat
+    /// When the microphone went live; sample 0 of the recording.
+    private(set) var startedAt = ContinuousClock.now
+    private let engine = AVAudioEngine()
+    private let lock = NSLock()
+    private var pending: [AVAudioPCMBuffer] = []
+    private var pendingFrames: AVAudioFrameCount = 0
+    private var sink: ((AVAudioPCMBuffer) -> Void)?
+    private var stopped = false
+    private var deviceObserver: NSObjectProtocol?
+    /// Serialises everything that touches `engine`: a device-change restart
+    /// (notification thread) and `stop()` (the speech actor) must never run
+    /// at once, or a restart could start the engine again after stop and
+    /// leave the microphone on. Separate from `lock`, which the tap thread
+    /// takes for every buffer.
+    private let engineLock = NSLock()
+
+    /// Audio kept while waiting for a session. Far more than the ~0.5 s a
+    /// hold needs; only bounds memory if a session is slow to claim it.
+    private static let maxPendingSeconds = 4.0
+
+    init() throws {
+        let input = engine.inputNode
+        format = input.inputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            throw SpeechEngineError.microphoneFormatUnavailable
+        }
+        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+            self?.receive(buffer)
+        }
+        do {
+            engine.prepare()
+            try engine.start()
+            startedAt = .now
+        } catch {
+            input.removeTap(onBus: 0)
+            throw SpeechEngineError.audioStartFailed(error.localizedDescription)
+        }
+        deviceObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil
+        ) { [weak self] _ in self?.restartOnNewDevice() }
+    }
+
+    /// The input device changed under a running capture: listen to the new one.
+    private func restartOnNewDevice() {
+        engineLock.lock()
+        defer { engineLock.unlock() }
+        lock.lock()
+        let done = stopped
+        lock.unlock()
+        guard !done else { return }   // checked under engineLock: stop() can't interleave
+
+        let input = engine.inputNode
+        input.removeTap(onBus: 0)
+        let device = input.inputFormat(forBus: 0)
+        guard device.sampleRate > 0, device.channelCount > 0 else {
+            Log.speech.error("Input device changed to one with no usable format; capture stopped")
+            return
+        }
+        let target = format
+        let bridge = device == target ? nil : AVAudioConverter(from: device, to: target)
+        input.installTap(onBus: 0, bufferSize: 1024, format: device) { [weak self] buffer, _ in
+            guard let self, let same = SpeechEngine.converted(buffer, with: bridge, to: target) else { return }
+            self.receive(same)
+        }
+        do {
+            engine.prepare()
+            try engine.start()
+            Log.speech.info("Input device changed mid-capture (\(device.sampleRate, privacy: .public) Hz); capture continued")
+        } catch {
+            input.removeTap(onBus: 0)
+            Log.speech.error("Input device changed; restart failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    private func receive(_ buffer: AVAudioPCMBuffer) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !stopped else { return }
+        if let sink {
+            sink(buffer)
+            return
+        }
+        // The tap may reuse its buffer; keep a copy.
+        guard let copy = buffer.copy() as? AVAudioPCMBuffer else { return }
+        pending.append(copy)
+        pendingFrames += copy.frameLength
+        let limit = AVAudioFrameCount(Self.maxPendingSeconds * format.sampleRate)
+        while pendingFrames > limit, !pending.isEmpty {
+            pendingFrames -= pending.removeFirst().frameLength
+        }
+    }
+
+    /// Replays everything captured so far into `sink`, then streams live audio to it.
+    func attach(_ sink: @escaping (AVAudioPCMBuffer) -> Void) {
+        lock.lock()
+        defer { lock.unlock() }
+        pending.forEach(sink)
+        pending.removeAll()
+        pendingFrames = 0
+        self.sink = sink
+    }
+
+    /// Stops the microphone. Safe to call more than once.
+    func stop() {
+        lock.lock()
+        let first = !stopped
+        stopped = true
+        sink = nil
+        pending.removeAll()
+        lock.unlock()
+        guard first else { return }
+        if let deviceObserver { NotificationCenter.default.removeObserver(deviceObserver) }
+        engineLock.lock()
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        engineLock.unlock()
+    }
+}
+
 /// Buffers yielded into the analyzer this session. Written only from the
 /// realtime tap (one thread) and read after the tap is removed.
 final class YieldCounter: @unchecked Sendable {
@@ -985,13 +1327,13 @@ extension SpeechEngine {
             buffer.floatChannelData.map { Array(UnsafeBufferPointer(start: $0[0], count: Int(buffer.frameLength))) }
         } ?? []
 
-        guard language.usesWhisper else { return try await appleTranscript(of: url).text }
+        guard language.usesWhisper else { return await finish(try await appleTranscript(of: url).text, mode: language) }
         let mode = language
         let whisperTask = Task { await self.transcribeWhisper(samples, mode: mode) }
         guard mode.usesEnglishCompanion, resolvedLocale != nil else {
-            return route(heard: await whisperTask.value, english: AppleTranscript(), mode: mode)
+            return await finish(route(heard: await whisperTask.value, english: AppleTranscript(), mode: mode), mode: mode)
         }
-        return await pick(english: try await appleTranscript(of: url), whisper: whisperTask, mode: mode)
+        return await finish(await pick(english: try await appleTranscript(of: url), whisper: whisperTask, mode: mode), mode: mode)
     }
 
     private func appleTranscript(of url: URL) async throws -> AppleTranscript {

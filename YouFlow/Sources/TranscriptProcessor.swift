@@ -247,11 +247,48 @@ enum CorrectionEngine {
         assert(EnglishSpelling.apply(to: "please send the reprt.", apple: words([("Please", 0.9), ("send", 0.9), ("the", 0.9), ("report", 0.9)]))
                == "Please send the report.", "sentence punctuation lost")
 
-        // Silence gate: a short phrase in a long hold is speech; faint hiss is not.
+        // Apple's chunks: collided sentences get a space, punctuation stays attached.
+        for (parts, expected) in [
+            (["and create something else", "So, here I was"], "and create something else So, here I was"),
+            (["How can I detect that?", "Problem."], "How can I detect that? Problem."),
+            (["Hello", " there"], "Hello there"),
+            (["Yusha", "'s laptop", ", okay"], "Yusha's laptop, okay"),
+            (["send it", "."], "send it."),
+            (["I need to check that", "and then send it"], "I need to check that and then send it"),
+            (["The total was 5.", "10 more came later"], "The total was 5. 10 more came later"),
+            (["I need 1, 2,", "3 copies"], "I need 1, 2, 3 copies"),
+            (["room 12", "34"], "room 1234"),
+            (["send 3 files.", "Then call"], "send 3 files. Then call"),
+        ] {
+            let got = TranscriptAccumulator.join(parts)
+            assert(got == expected, "chunk join: \(parts) -> \(got)")
+        }
+
+        // Short English replies: real English words only, no Bangla lookalikes.
+        if Thread.isMainThread {
+            MainActor.assumeIsolated {
+                for yes in ["No.", "Cool.", "Got it.", "Sounds good.", "Call me."] {
+                    assert(SpeechEngine.isShortEnglish(yes), "short English rejected: \(yes)")
+                }
+                for no in ["Bolo.", "Cholo?", "Pikachi.", "Ancha.", "Please send the report now.", "", "জি"] {
+                    assert(!SpeechEngine.isShortEnglish(no), "Bangla read as short English: \(no)")
+                }
+            }
+        }
+
+        // Silence gate: a short word in a long hold is speech; faint hiss and
+        // the 120 ms start click on their own are not.
+        let gate = SpeechEngine.minimumAudibleSeconds
         var longHold = [Float](repeating: 0, count: 16_000 * 10)
-        for i in 0..<1600 { longHold[i] = 0.05 }
-        assert(SpeechEngine.loudestWindowRMS(longHold) > 0.0018, "short phrase in long hold read as silence")
-        assert(SpeechEngine.loudestWindowRMS([Float](repeating: 0.0005, count: 16_000)) < 0.0018, "hiss read as speech")
+        for i in 0..<6_400 { longHold[i + 40_000] = 0.05 * sin(Float(i) * 0.3) }           // 0.4 s word
+        assert(SpeechEngine.audibleSeconds(longHold) >= gate, "short word in long hold read as silence")
+        assert(SpeechEngine.audibleSeconds([Float](repeating: 0.0005, count: 16_000)) < gate, "hiss read as speech")
+        var click = [Float](repeating: 0, count: 16_000 * 2)
+        for i in 0..<1_920 { click[i + 1_500] = 0.3 * sin(Float(i) * 0.04) * exp(-Float(i) / 700) }  // 0.12 s burst
+        assert(SpeechEngine.audibleSeconds(click, ignoring: [1_200..<5_500]) < gate, "start click read as speech")
+        var quickYes = [Float](repeating: 0, count: 16_000)
+        for i in 0..<2_560 { quickYes[i + 8_000] = 0.05 * sin(Float(i) * 0.3) }           // 0.16 s "হ্যাঁ"
+        assert(SpeechEngine.audibleSeconds(quickYes, ignoring: [1_200..<5_500]) >= gate, "quick word read as silence")
 
         // Banglish: Bangla script romanized the way people type it; English untouched.
         for (input, expected) in [
@@ -260,22 +297,286 @@ enum CorrectionEngine {
             ("ধন্যবাদ ভাই", "dhonnobad bhai"),
             ("This project টা আজকে শেষ করতে হবে, okay?", "This project ta ajke shesh korte hobe, okay?"),
             ("আমি একটু পরে কল করবো।", "ami ektu pore kol korbo."),
+            ("আমি যাব তারপর দিব", "ami jabo taropor dibo"),
+            ("করব বলব খাব পাব", "korbo bolbo khabo pabo"),
+            ("ভাব সব হিসাব জবাব নবাব শিব জীব গজব তলব দেব", "bhab shob hishab jobab nobab shib jib gojob tolob deb"),
+            ("সামনে সামনের জীবনে", "shamne shamner jibone"),
             ("কেন হবে না", "keno hobe na"),
             ("১২৩ টাকা", "123 taka"),
             ("meeting-এ যাচ্ছি", "meeting-e jachchi"),
             ("সময় নেই, আমি আসবো", "shomoy nei, ami ashbo"),
             ("স্কুলের রাস্তা", "skuler rasta"),
             ("পরীক্ষা", "porikha"),
+            ("ব্যবসা নিয়ে ব্যস্ত ব্যক্তি", "bebsha niye besto bekti"),
+            ("ব্যবহার ব্যবস্থা ব্যথা", "bebohar bebostha betha"),
+            ("ব্যাংকের ব্যাগ", "bangker bag"),
+            ("জীবনে জীবনের শহরে সময়ে", "jibone jiboner shohore shomoye"),
+            ("লোকদের বলতে হবে কালকের কথা", "lokder bolte hobe kalker kotha"),
             ("Please send the report.", "Please send the report."),
         ] {
             let got = BanglaRomanizer.apply(to: input)
             assert(got == expected, "banglish: \(input) -> \(got)")
         }
 
+        // Learning from corrections: (field after paste, field later, dictated) → fixes.
+        let ordinary: Set = ["daily", "weekly", "there", "their", "great", "awesome", "it's", "its"]
+        func learned(_ before: String, _ after: String, _ dictated: String) -> [LearnedFix] {
+            CorrectionLearner.suggestions(before: before, after: after, dictated: dictated,
+                                          isOrdinaryWord: ordinary.contains)
+        }
+        let said = "I use cloud code daily."
+        let fixed = [LearnedFix(heard: "cloud code", written: "Claude Code")]
+        for (before, after, expected) in [
+            // The example: the neighbour that only changed case joins the fix.
+            ("Notes: \(said)", "Notes: I use Claude Code daily.", fixed),
+            // Found inside a field the user also edited elsewhere, and typed on after.
+            ("Dear team, \(said)", "Hi all, I use Claude Code daily. More later.", fixed),
+            // Two words merged into one.
+            ("We deploy on super base today", "We deploy on Supabase today",
+             [LearnedFix(heard: "super base", written: "Supabase")]),
+            // Not learnable: unchanged, casing only, punctuation only.
+            (said, said, []),
+            (said, "I use Cloud Code daily.", []),
+            (said, "I use cloud code, daily!", []),
+            // Not learnable: unrelated word, plain-English swap, added word, rewrite.
+            (said, "I use cloud code awesome.", []),
+            (said, "I use cloud code weekly.", []),
+            (said, "I use cloud code nearly daily.", []),
+            (said, "Totally different sentence here now.", []),
+        ] {
+            let dictated = before.hasSuffix(said) ? said : before
+            let got = learned(before, after, dictated)
+            assert(got == expected, "learn: \(after) -> \(got)")
+        }
+        // A one-word dictation has nothing to anchor it.
+        assert(learned("Vercell", "Vercel", "Vercell").isEmpty, "learned from an unanchored word")
+
+        // Clean-up guard: the model suggests, the guard decides (full parity: --cleanup-replay).
+        for (said, model, expected) in [
+            // a word the model changed (here: transliterated) is reverted to the spoken word
+            ("আমার urgent কাজ আছে", "আমার अर्जেন্ট কাজ আছে।", "আমার urgent কাজ আছে।"),
+            // the name after শোনো is never deleted
+            ("শোনো রাফি আজকে মিটিং আছে", "শোনো, আজকে মিটিং আছে।", "শোনো, রাফি আজকে মিটিং আছে।"),
+            // "না না" is emphasis, not a stutter
+            ("না না আমি রাগ করিনি", "আমি রাগ করিনি।", "না না আমি রাগ করিনি।"),
+            // a real stutter and a proven self-correction are removed
+            ("সে সে আজকে আসবে না", "সে আজকে আসবে না।", "সে আজকে আসবে না।"),
+            ("call him at three no wait at four", "Call him at four.", "Call him at four."),
+            // quotation marks the model wraps around its answer are dropped
+            ("start a new paragraph after the quote", "\"Start a new paragraph after the quote.\"",
+             "Start a new paragraph after the quote."),
+        ] {
+            let got = CleanupGuard.finalize(spoken: said, cleanRaw: model, layoutRaw: nil)
+            assert(got == expected, "cleanup guard: \(said) / \(model) -> \(got)")
+        }
+        // `?` without a question cue becomes । or .; real questions keep it.
+        for (input, expected) in [
+            ("আমি কালকে যাবো?", "আমি কালকে যাবো।"),
+            ("I will send it?", "I will send it."),
+            ("তুমি কি কালকে আসবে?", "তুমি কি কালকে আসবে?"),
+            ("Can you send it?", "Can you send it?"),
+            ("It works, right?", "It works, right?"),
+            ("Done।", "Done."),
+        ] {
+            let got = CleanupGuard.fixQuestions(input)
+            assert(got == expected, "fix questions: \(input) -> \(got)")
+        }
+        assert(CleanupGuard.applyCommands("Hi team new paragraph the report is ready new line thanks")
+               == "Hi team,\n\nThe report is ready.\nThanks", "spoken commands")
+        assert(CleanupGuard.applyCommands("we need a new line of code") == "we need a new line of code",
+               "spoken command inside a sentence")
+
         Log.app.info("CorrectionEngine self-check passed")
         if CommandLine.arguments.contains("--self-check") {
             print("CorrectionEngine self-check: PASS")
         }
+    }
+}
+
+// MARK: - Learning from corrections
+
+/// A word or two the user fixed by hand right after dictating: "cloud code"
+/// was pasted, "Claude Code" is what the field says now.
+struct LearnedFix: Hashable {
+    var heard: String
+    var written: String
+}
+
+/// Finds the fixes worth proposing for the dictionary by comparing the text
+/// field before and after the user had a chance to edit it. Pure — strings in,
+/// pairs out — so it is checked without a text field (see the self-check).
+///
+/// What counts: one or two dictated words replaced by one or two words that
+/// look or sound alike ("cloud" → "Claude", "super base" → "Supabase").
+/// What doesn't, because the dictionary can't or shouldn't help: casing- or
+/// punctuation-only edits, added or deleted words, unrelated rewrites
+/// ("great" → "awesome"), plain-English word swaps ("their" → "there"), and
+/// everything when most of the dictation was rewritten — that is editing,
+/// not correcting.
+enum CorrectionLearner {
+    /// ponytail: calibration knobs. Raise `minSimilarity` if suggestions are
+    /// noise, lower it if real fixes are missed. `maxChangedFraction` is where
+    /// "fixed a word" turns into "rewrote it".
+    static let minSimilarity = 0.5
+    static let maxChangedFraction = 0.5
+    static let maxFixesPerDictation = 3
+    /// A long document is only searched this many characters either side of
+    /// where the dictation was pasted.
+    static let searchMargin = 2_000
+
+    private struct Token {
+        /// The word as written, minus surrounding punctuation.
+        let text: String
+        /// What two words must share to count as unchanged.
+        let key: String
+    }
+
+    private enum Op { case same(Int, Int), changed(Int?, Int?) }
+
+    /// - Parameters:
+    ///   - before: the field right after the paste landed.
+    ///   - after: the same field once the user had time to fix things.
+    ///   - dictated: exactly what was pasted.
+    ///   - isOrdinaryWord: true for a plain dictionary word; a fix made only
+    ///     of lowercase ordinary words is a word choice, not a vocabulary gap.
+    static func suggestions(
+        before: String,
+        after: String,
+        dictated: String,
+        isOrdinaryWord: (String) -> Bool = { _ in false }
+    ) -> [LearnedFix] {
+        guard before != after else { return [] }
+        let spoken = tokens(dictated)
+        let field = tokens(window(of: after, near: before, dictated: dictated))
+        guard !spoken.isEmpty, !field.isEmpty else { return [] }
+
+        let ops = align(spoken, field)
+        // The dictation has to still be recognisably there. Also rejects a
+        // one-word dictation, which has nothing around it to anchor it.
+        let unchanged = ops.filter { if case .same = $0 { return true }; return false }.count
+        guard unchanged > 0, Double(unchanged) >= Double(spoken.count) * (1 - maxChangedFraction) else { return [] }
+
+        var fixes: [LearnedFix] = []
+        var index = 0
+        while index < ops.count {
+            guard case .changed = ops[index] else { index += 1; continue }
+            var end = index
+            while end + 1 < ops.count, case .changed = ops[end + 1] { end += 1 }
+            defer { index = end + 1 }
+
+            var heard: [Int] = [], written: [Int] = []
+            for case .changed(let i, let j) in ops[index...end] {
+                if let i { heard.append(i) }
+                if let j { written.append(j) }
+            }
+            guard (1...2).contains(heard.count), (1...2).contains(written.count) else { continue }
+
+            let heardKey = heard.map { spoken[$0].key }.joined()
+            let writtenKey = written.map { field[$0].key }.joined()
+            let heardLetters = lettersOnly(heardKey), writtenLetters = lettersOnly(writtenKey)
+            guard !heardLetters.isEmpty, !writtenLetters.isEmpty else { continue }
+            // "its" → "it's": punctuation inside a word, not a new word. A
+            // regrouping ("next JS" → "Next.js") changes the word count and stays.
+            if heardLetters == writtenLetters, heard.count == written.count { continue }
+            guard similarity(heardLetters, writtenLetters) >= minSimilarity else { continue }
+            guard !written.allSatisfy({ field[$0].text == field[$0].key && isOrdinaryWord(field[$0].text) }) else { continue }
+
+            // A neighbour that only changed case belongs to the same name:
+            // "cloud code" → "Claude Code" is one fix, and far safer than
+            // rewriting every "cloud".
+            if index > 0, case .same(let i, let j) = ops[index - 1], spoken[i].text != field[j].text {
+                heard.insert(i, at: 0); written.insert(j, at: 0)
+            }
+            if end + 1 < ops.count, case .same(let i, let j) = ops[end + 1], spoken[i].text != field[j].text {
+                heard.append(i); written.append(j)
+            }
+
+            let fix = LearnedFix(
+                heard: heard.map { spoken[$0].text }.joined(separator: " "),
+                written: written.map { field[$0].text }.joined(separator: " "))
+            if !fixes.contains(fix) { fixes.append(fix) }
+        }
+        return Array(fixes.prefix(maxFixesPerDictation))
+    }
+
+    private static func tokens(_ text: String) -> [Token] {
+        let edges = CharacterSet.punctuationCharacters.union(.symbols)
+        return text.split(whereSeparator: \.isWhitespace).compactMap { raw in
+            let word = raw.replacingOccurrences(of: "\u{2019}", with: "'").trimmingCharacters(in: edges)
+            return word.isEmpty ? nil : Token(text: word, key: word.lowercased())
+        }
+    }
+
+    private static func lettersOnly(_ s: String) -> String {
+        String(s.unicodeScalars.filter(CharacterSet.alphanumerics.contains))
+    }
+
+    /// Spelling and sound, averaged: either alone lets through pairs like
+    /// "daily"/"weekly", which merely share a few letters or a crude sound key.
+    private static func similarity(_ a: String, _ b: String) -> Double {
+        let spelling = EnglishSpelling.similarity(a, b)
+        let ka = EnglishSpelling.key(a), kb = EnglishSpelling.key(b)
+        // Non-Latin script has no sound key; spelling is all there is.
+        guard !ka.isEmpty, !kb.isEmpty else { return spelling }
+        return (spelling + EnglishSpelling.similarity(ka, kb)) / 2
+    }
+
+    /// The part of a long field worth aligning against: around where the
+    /// dictation sat right after the paste. Short fields are used whole.
+    private static func window(of after: String, near before: String, dictated: String) -> String {
+        let text = after as NSString
+        guard text.length > (dictated as NSString).length + 2 * searchMargin else { return after }
+        let at = (before as NSString).range(of: dictated, options: .backwards)
+        // A long document the dictation can't be found in: too little to go on.
+        guard at.location != NSNotFound else { return "" }
+        // `at` is an offset into the field as it was; the user may have
+        // deleted a lot above it since, so clamp to the field as it is.
+        let start = min(max(0, at.location - searchMargin), text.length)
+        let end = min(text.length, at.location + at.length + searchMargin)
+        guard end > start else { return "" }
+        return text.substring(with: NSRange(location: start, length: end - start))
+    }
+
+    /// Word-level edit alignment of the whole dictation against any stretch
+    /// of the field (text before and after the dictation is free to skip).
+    /// A substitution costs a little less than a gap, so a fixed word lines
+    /// up with its replacement instead of reading as a deletion plus an
+    /// unrelated insertion. A match earns credit rather than costing nothing,
+    /// or at the end of the dictation "daily" → "nearly daily" would read as
+    /// "daily" replaced by "nearly", the real "daily" left in the free tail.
+    private static func align(_ spoken: [Token], _ field: [Token]) -> [Op] {
+        let n = spoken.count, m = field.count, width = m + 1
+        let match = -1.0, substitution = 0.9, gap = 1.0
+        var cost = [Double](repeating: 0, count: (n + 1) * width)
+        // 0 diagonal, 1 dictated word dropped, 2 field word added.
+        var move = [UInt8](repeating: 0, count: (n + 1) * width)
+        for i in 1...n {
+            cost[i * width] = Double(i) * gap
+            move[i * width] = 1
+            for j in 1...m {
+                let same = spoken[i - 1].key == field[j - 1].key
+                var best = cost[(i - 1) * width + j - 1] + (same ? match : substitution), step: UInt8 = 0
+                if cost[(i - 1) * width + j] + gap < best { best = cost[(i - 1) * width + j] + gap; step = 1 }
+                if cost[i * width + j - 1] + gap < best { best = cost[i * width + j - 1] + gap; step = 2 }
+                cost[i * width + j] = best
+                move[i * width + j] = step
+            }
+        }
+        var j = (0...m).min { cost[n * width + $0] < cost[n * width + $1] } ?? m
+        var i = n
+        var ops: [Op] = []
+        while i > 0 {
+            switch move[i * width + j] {
+            case 0:
+                ops.append(spoken[i - 1].key == field[j - 1].key ? .same(i - 1, j - 1) : .changed(i - 1, j - 1))
+                i -= 1; j -= 1
+            case 1:
+                ops.append(.changed(i - 1, nil)); i -= 1
+            default:
+                ops.append(.changed(nil, j - 1)); j -= 1
+            }
+        }
+        return ops.reversed()
     }
 }
 
@@ -540,6 +841,9 @@ enum BanglaRomanizer {
     private static let exceptions: [String: String] = [
         "কেন": "keno", "কত": "koto", "এত": "eto", "যত": "joto", "তত": "toto",
         "মত": "moto", "বড়": "boro", "ছোট": "choto", "ভাল": "bhalo", "হ্যাঁ": "ha",
+        // The -e / -er suffix rule keeps the stem's vowel (জীবনে "jibone");
+        // these stems drop it in speech.
+        "সামনে": "shamne", "সামনের": "shamner", "কেমনে": "kemne", "আপনে": "apne",
     ]
 
     private enum Vowel { case inherent, none, sign(String) }
@@ -577,10 +881,27 @@ enum BanglaRomanizer {
         return out
     }
 
+    /// The first-person future ("I'll go") is spoken -bo, but Whisper often
+    /// writes it without its ো: যাব, দিব, করব. Read literally those come out
+    /// "jab", "dib", "korob"; spelled with the ো they come out right. A list,
+    /// not a shape rule: the same shapes are nouns and names that really end
+    /// in a silent b (শিব, জীব, গজব, ভাব, and দেব, which is also "Dev").
+    private static let futureStems: Set<String> = [
+        "যাব", "দিব", "নিব", "নেব", "করব", "বলব", "খাব", "পাব", "দেখব", "শুনব", "আসব",
+        "থাকব", "লিখব", "পড়ব", "রাখব", "ধরব", "ভাবব", "বসব", "উঠব", "খেলব", "কিনব",
+        "বুঝব", "জানব", "চিনব", "ফেলব", "পারব", "শিখব", "বানাব", "পাঠাব", "দেখাব",
+        "চালাব", "ঘুমাব", "হাঁটব", "ছাড়ব", "মারব", "চাইব", "খুঁজব", "নামব", "হাসব",
+    ]
+
+    private static func futureWithoutO(_ word: String) -> String? {
+        futureStems.contains(word) ? word + "\u{09CB}" : nil
+    }
+
     private static func isBangla(_ s: Unicode.Scalar) -> Bool { (0x0980...0x09FF).contains(s.value) }
 
     private static func romanize(word: String) -> String {
         if let known = exceptions[word] { return known }
+        if let future = futureWithoutO(word) { return romanize(word: future) }
 
         // Pass 1: letters into units.
         var units: [Unit] = []
@@ -599,7 +920,15 @@ enum BanglaRomanizer {
                         afterVirama = false
                         continue
                     case "\u{09AF}":                                     // ya-phala
-                        let nextIsAa = i + 1 < scalars.count && scalars[i + 1] == "\u{09BE}"
+                        let next = i + 1 < scalars.count ? scalars[i + 1] : nil
+                        // Word-initial with no vowel sign it is spoken "e" (æ):
+                        // ব্যবসা "bebsha", ব্যস্ত "besto".
+                        if clusterStartsWord, next.map({ vowelSigns[$0] == nil && $0 != virama }) ?? true {
+                            units.append(.consonant(sound: "", vowel: .sign("e"), joined: true))
+                            afterVirama = false
+                            continue
+                        }
+                        let nextIsAa = next == "\u{09BE}"
                         sound = clusterStartsWord ? (nextIsAa ? "" : "y") : (prev.count == 1 ? prev : "")
                     case "\u{09AC}":                                     // ba-phala
                         sound = clusterStartsWord ? "" : (prev.count == 1 ? prev : "")
@@ -647,12 +976,33 @@ enum BanglaRomanizer {
                 out += sound; previousVoiced = false
             case .consonant(let sound, .inherent, let joined):
                 let isLast = position == letterIndices.count - 1
-                let nextHasSign: Bool = {
-                    guard !isLast, case .consonant(_, .sign, false) = units[letterIndices[position + 1]] else { return false }
-                    return true
+                let next: (sound: String, sign: String)? = {
+                    guard !isLast, case .consonant(let s, .sign(let v), false) = units[letterIndices[position + 1]] else { return nil }
+                    return (s, v)
+                }()
+                let nextHasSign = next != nil
+                // Dropping the vowel would fuse with a following h into a
+                // digraph that reads as another letter: ব্যবহার "bebohar", not "bebhar".
+                let wouldFormDigraph = ["k", "g", "j", "t", "d", "p", "b", "s"].contains(sound)
+                    && next?.sound.hasPrefix("h") == true
+                // A vowel suffix -e / -er on a consonant-final stem keeps the
+                // stem's last vowel: জীবনে "jibone", শহরে "shohore", সময়ের "shomoyer".
+                // Only after n/r/m/y/j (and d for bare -e): -te, -le, -ke, -be,
+                // -che, -der are consonant suffixes on a bare stem ("bolte",
+                // "korle", "kalke", "korbe", "lokder").
+                let vowelSuffixFollows: Bool = {
+                    guard let next, next.sign == "e", ["n", "r", "m", "y", "j", "d"].contains(next.sound) else { return false }
+                    let rest = letterIndices.count - position - 2
+                    if rest == 0 { return true }
+                    guard rest == 1 else { return false }
+                    switch units[letterIndices[position + 2]] {
+                    case .consonant("r", .inherent, _): return next.sound != "d"   // -er, but not plural -der
+                    case .vowel: return true                                       // emphatic -eo / -ei
+                    default: return false
+                    }
                 }()
                 let voiced: Bool
-                if modifierFollows || letterIndices.count == 1 {
+                if modifierFollows || letterIndices.count == 1 || wouldFormDigraph || vowelSuffixFollows {
                     voiced = true
                 } else if isLast {
                     voiced = joined                     // "shob-do", "jach-cho"; else silent

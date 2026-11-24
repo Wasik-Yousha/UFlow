@@ -36,11 +36,19 @@ final class AppState: ObservableObject, StatusInfoProvider {
     let transcripts = TranscriptStore()
     let dictionary = DictionaryStore()
     let settings = AppSettings()
+    let suggestions = SuggestionStore()
+    /// The on-device clean-up model for this Mac (Settings → Clean-up).
+    let cleanup = CleanupController()
 
     private let hotkeyManager = HotkeyManager()
     private let engine = SpeechEngine()
     private let hud = HUDPanelController()
     private let injector = ClipboardInjector()
+    private let correctionWatcher = CorrectionWatcher()
+    private lazy var pasteLastShortcut = GlobalShortcut(.pasteLast) { [weak self] in
+        self?.pasteLastDictation()
+    }
+    private var pasteLastTask: Task<Void, Never>?
     private(set) weak var statusBarController: StatusBarController?
 
     // MARK: - Published state
@@ -96,17 +104,26 @@ final class AppState: ObservableObject, StatusInfoProvider {
     /// Presses shorter than this are treated as accidental taps.
     private static let minimumPressDuration: Duration = .milliseconds(120)
 
+    /// Hard cap on one recording. Past it the session stops as if the key was
+    /// released and the transcript is still delivered. A backstop for a release
+    /// nothing caught (the hotkey poller covers the usual cases), a forgotten
+    /// toggle-mode session, or a window RECORD left running.
+    private static let maxRecordingDuration: Duration = .seconds(5 * 60)
+
     // MARK: - Init
 
     init() {
         hotkeyManager.onTriggerDown = { [weak self] in self?.handleTriggerDown() }
         hotkeyManager.onTriggerUp = { [weak self] in self?.handleTriggerUp() }
+        hotkeyManager.onArm = { [weak self] in self?.armMicrophone() }
+        hotkeyManager.onDisarm = { [weak self] in self?.disarmMicrophone() }
         hotkeyManager.setTrigger(settings.hotkeyTrigger)
 
         // SwiftUI does not observe nested ObservableObjects, so a new
         // transcript or dictionary edit would never redraw the window. Forward
         // their change notifications into this object's own.
-        for nested in [transcripts.objectWillChange, dictionary.objectWillChange, settings.objectWillChange] {
+        for nested in [transcripts.objectWillChange, dictionary.objectWillChange,
+                       settings.objectWillChange, suggestions.objectWillChange] {
             nested
                 .sink { [weak self] in self?.objectWillChange.send() }
                 .store(in: &cancellables)
@@ -131,6 +148,33 @@ final class AppState: ObservableObject, StatusInfoProvider {
             .dropFirst()
             .sink { [weak self] language in
                 self?.applyLanguage(language)
+            }
+            .store(in: &cancellables)
+
+        // Clean-up runs only when switched on AND the model is on disk; the
+        // engine gets a cleaner or nil, so a dictation never waits on a
+        // missing model.
+        cleanup.objectWillChange
+            .sink { [weak self] in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+        settings.$cleanupEnabled.combineLatest(cleanup.$phase)
+            .sink { [weak self] enabled, phase in
+                guard let self else { return }
+                let cleaner = enabled && phase == .ready ? TextCleaner(llm: self.cleanup.llm) : nil
+                if cleaner == nil, phase == .ready { self.cleanup.llm.unload() }
+                Task { await self.engine.setCleaner(cleaner) }
+            }
+            .store(in: &cancellables)
+
+        correctionWatcher.onFixes = { [weak self] fixes in
+            guard let self, self.settings.learnFromCorrections else { return }
+            self.suggestions.record(fixes, ruleset: self.dictionary.ruleset)
+        }
+        // Switched off mid-watch: stop reading the field right away.
+        settings.$learnFromCorrections
+            .dropFirst()
+            .sink { [weak self] enabled in
+                if !enabled { self?.correctionWatcher.cancel() }
             }
             .store(in: &cancellables)
     }
@@ -164,6 +208,8 @@ final class AppState: ObservableObject, StatusInfoProvider {
         // app must answer the key meanwhile ("Downloading… 40%"), not sit on
         // "Starting…".
         attemptHotkeyInstall()
+        // Needs no permission, so it works even while Input Monitoring is pending.
+        pasteLastShortcut.register()
 
         // Engine preparation only requires the microphone — decoupled from
         // event-tap permissions so speech assets download even while the user
@@ -278,13 +324,13 @@ final class AppState: ObservableObject, StatusInfoProvider {
     /// being typed anywhere.
     func startFromWindow() {
         guard sessionTask == nil else { return }
-        SoundKit.play(.recordDown)
+        playStartCue()
         begin(from: .window)
     }
 
     func stopFromWindow() {
         guard sessionTask != nil else { return }
-        SoundKit.play(.stopDown)
+        playStopCue()
         guard state == .recording else { return }
         isShortPress = false
         signalRelease()
@@ -292,12 +338,79 @@ final class AppState: ObservableObject, StatusInfoProvider {
 
     // MARK: - Trigger handling
 
+    /// Fn went down: start the microphone now, so the words spoken during the
+    /// hold check and engine start-up are kept. Only when a recording could
+    /// actually begin — never around password fields or without permission.
+    ///
+    /// Not at the very instant of key-down: a Globe tap (input-source switch,
+    /// emoji picker) is usually over within `armDelay`, and opening the mic
+    /// for it would flash the privacy dot — and switch AirPods into
+    /// low-quality call mode — for a press that never dictates. Speech rarely
+    /// starts that soon after the press, so the delay costs nothing audible.
+    private func armMicrophone() {
+        armGeneration += 1
+        let generation = armGeneration
+        guard sessionTask == nil, enginePrepared,
+              permissionManager.state.allGranted,
+              !IsSecureEventInputEnabled() else { return }
+        Task { [weak self] in
+            try? await Task.sleep(for: Self.armDelay)
+            // Released (or disarmed for any other reason) meanwhile: never open the mic.
+            guard let self, self.armGeneration == generation, self.sessionTask == nil else { return }
+            // The token lets the engine drop this arm if a disarm sent after
+            // this point overtakes it on the way to the actor.
+            await self.engine.armMicrophone(token: generation)
+        }
+    }
+
+    /// The record click. The microphone may already be live and hear it, so
+    /// the engine is told when, and doesn't mistake it for speech.
+    private func playStartCue() {
+        let now = ContinuousClock.now
+        SoundKit.play(.recordDown)
+        Task { await engine.noteCue(at: now) }
+    }
+
+    /// The stop click, while the microphone is still live: noted like the
+    /// start click so it can't be mistaken for speech either.
+    private func playStopCue() {
+        let now = ContinuousClock.now
+        SoundKit.play(.stopDown)
+        Task { await engine.noteCue(at: now) }
+    }
+
+    private func disarmMicrophone() {
+        armGeneration += 1
+        let token = armGeneration
+        Task { await engine.disarmMicrophone(token: token) }
+    }
+
+    /// See `armMicrophone`. Below `HotkeyManager.holdDelay` (300 ms), so the
+    /// mic is live well before the hold is confirmed.
+    private static let armDelay: Duration = .milliseconds(120)
+    private var armGeneration = 0
+
+    /// When the recording cap last ended a session. In toggle mode the user
+    /// may tap to stop a moment after the cap already did; that tap must not
+    /// start a new recording into whatever app is in front.
+    private var cappedAt: ContinuousClock.Instant?
+    /// Set by the cap for the session in progress only.
+    private var sessionWasCapped = false
+    private static let tapAfterCapGrace: Duration = .seconds(3)
+
     private func handleTriggerDown() {
+        if settings.effectiveHotkeyMode == .toggle, sessionTask == nil,
+           let cappedAt, ContinuousClock.now - cappedAt < Self.tapAfterCapGrace {
+            Log.hotkey.info("Toggle tap ignored: the recording cap just stopped the session")
+            self.cappedAt = nil
+            disarmMicrophone()
+            return
+        }
         // Toggle mode: a second tap while recording stops the session.
         if settings.effectiveHotkeyMode == .toggle, sessionTask != nil {
             if state == .recording {
                 Log.hotkey.info("Toggle: second tap — stopping session")
-                SoundKit.play(.stopDown)
+                playStopCue()
                 isShortPress = false
                 signalRelease()
             } else {
@@ -319,6 +432,7 @@ final class AppState: ObservableObject, StatusInfoProvider {
         // no keystroke synthesis around password fields.
         if origin == .hotkey, IsSecureEventInputEnabled() {
             Log.hotkey.info("Trigger DOWN ignored: Secure Event Input active")
+            disarmMicrophone()
             return
         }
 
@@ -327,11 +441,13 @@ final class AppState: ObservableObject, StatusInfoProvider {
             let missing = permissionManager.state.missingBlockingNames.joined(separator: ", ")
             state = .unavailable("Permission missing: \(missing)")
             Log.hotkey.info("Trigger DOWN ignored: missing permissions (\(missing, privacy: .public))")
+            disarmMicrophone()
             return
         }
         guard permissionManager.state.microphoneGranted else {
             state = .unavailable("Microphone access is required")
             SoundKit.play(.error)
+            disarmMicrophone()
             return
         }
 
@@ -341,7 +457,9 @@ final class AppState: ObservableObject, StatusInfoProvider {
         isShortPress = false
         releasePending = false
 
-        if origin == .hotkey { SoundKit.play(.recordDown) }
+        if origin == .hotkey { playStartCue() }
+        // Load the clean-up model while the user is still talking.
+        if settings.cleanupEnabled { cleanup.warmUp() }
 
         state = .recording
         startElapsedClock()
@@ -402,6 +520,14 @@ final class AppState: ObservableObject, StatusInfoProvider {
     private func runSession() async {
         let startedAt = Date()
         defer {
+            // No-op when startRecording claimed the capture; otherwise (engine
+            // not ready, error before recording) the microphone stops here.
+            disarmMicrophone()
+            // The grace for a stray toggle tap runs from when the capped
+            // session actually finished (transcription can take seconds);
+            // any other session ending clears it.
+            cappedAt = sessionWasCapped ? .now : nil
+            sessionWasCapped = false
             sessionTask = nil
             originApp = nil
             pressStartedAt = nil
@@ -455,6 +581,25 @@ final class AppState: ObservableObject, StatusInfoProvider {
                     if self?.origin == .hotkey { self?.hud.push(level: CGFloat(level)) }
                 }
             }
+
+            // The user moved on, so whatever they fixed in the last dictation
+            // is final. Only now, with the microphone live: reading another
+            // app's field can block the main actor for up to a second, and
+            // before the mic started that cost the first words.
+            correctionWatcher.finishNow()
+
+            // Backstop: stop as if released once the cap is reached. Cancelled
+            // when this scope ends, and a no-op once the session left .recording.
+            let recordingCap = Task { [weak self] in
+                try? await Task.sleep(for: Self.maxRecordingDuration)
+                guard !Task.isCancelled, let self, self.state == .recording else { return }
+                Log.hotkey.warning("Recording reached the maximum length — stopping as if released")
+                self.sessionWasCapped = true
+                self.isShortPress = false
+                playStopCue()
+                self.signalRelease()
+            }
+            defer { recordingCap.cancel() }
 
             // Wait for the stop signal (or resolve instantly if it already came).
             if releasePending {
@@ -513,7 +658,8 @@ final class AppState: ObservableObject, StatusInfoProvider {
 
             if origin == .hotkey, let origin = originApp {
                 state = .injecting
-                _ = await injector.inject(text: finalText, origin: origin)
+                let outcome = await injector.inject(text: finalText, origin: origin)
+                watchForCorrections(after: outcome, of: finalText)
             }
             state = .ready
             SoundKit.play(.keyUp)
@@ -530,6 +676,72 @@ final class AppState: ObservableObject, StatusInfoProvider {
             SoundKit.play(.error)
             state = .error(error.localizedDescription)
         }
+    }
+}
+
+// MARK: - Paste last dictation, learning from corrections
+
+extension AppState {
+    /// Pastes the newest transcript again into whatever app is in front — for
+    /// when the first paste didn't land (an app ignored the synthetic ⌘V, or
+    /// focus moved). Bound to ⌃⌥V and the menu bar item. An error click when
+    /// there is nothing to paste, a dictation is running, or a password field
+    /// has Secure Event Input on.
+    func pasteLastDictation() {
+        permissionManager.refresh()
+        guard pasteLastTask == nil, sessionTask == nil,
+              let text = transcripts.records.first?.text,
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !IsSecureEventInputEnabled(),
+              permissionManager.state.postEventGranted else {
+            Log.app.info("Paste last dictation: nothing to paste, or not allowed right now")
+            SoundKit.play(.error)
+            return
+        }
+        pasteLastTask = Task { [weak self] in
+            await Self.waitForModifierRelease()
+            guard let self else { return }
+            defer { self.pasteLastTask = nil }
+            guard let target = NSWorkspace.shared.frontmostApplication else { return }
+            let outcome = await self.injector.inject(text: text, origin: target)
+            if case .keptOnClipboard = outcome {
+                SoundKit.play(.error)
+                return
+            }
+            SoundKit.play(.keyUp)
+            self.watchForCorrections(after: outcome, of: text)
+        }
+    }
+
+    /// The shortcut's ⌃⌥ are usually still down when it fires. A ⌘V landing
+    /// meanwhile reads as ⌃⌥⌘V in apps that check the live modifier state,
+    /// so wait for them to lift (up to a second). The short first sleep also
+    /// lets the status menu close and hand focus back to the app behind it.
+    private static func waitForModifierRelease() async {
+        try? await Task.sleep(for: .milliseconds(60))
+        let held: CGEventFlags = [.maskControl, .maskAlternate, .maskShift, .maskCommand]
+        for _ in 0..<50 {
+            if CGEventSource.flagsState(.combinedSessionState).intersection(held).isEmpty { return }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+    }
+
+    /// Starts reading the field for hand corrections when the user opted in
+    /// and the text went to the app in front. On the origin-PID route the
+    /// focused field belongs to a different app, so there is nothing to read.
+    private func watchForCorrections(after outcome: InjectionOutcome, of text: String) {
+        guard settings.learnFromCorrections, permissionManager.state.accessibilityGranted,
+              case .injected = outcome else { return }
+        correctionWatcher.begin(dictated: text)
+    }
+
+    func acceptSuggestion(_ suggestion: CorrectionSuggestion) {
+        dictionary.add(DictionaryEntry(kind: .fix, match: suggestion.heard, replacement: suggestion.written))
+        suggestions.remove(suggestion)
+    }
+
+    func dismissSuggestion(_ suggestion: CorrectionSuggestion) {
+        suggestions.dismiss(suggestion)
     }
 }
 
@@ -564,6 +776,12 @@ extension AppState {
 
     func openSettingsRequested() {
         permissionManager.openRelevantSettingsPane()
+    }
+
+    var canPasteLastDictation: Bool { !transcripts.records.isEmpty }
+
+    func pasteLastDictationRequested() {
+        pasteLastDictation()
     }
 }
 
@@ -600,6 +818,11 @@ extension AppState {
             DictionaryEntry(kind: .fix, match: "Vercell", replacement: "Vercel"),
         ] where !dictionary.entries.contains(where: { $0.match == entry.match }) {
             dictionary.add(entry)
+        }
+        if suggestions.suggestions.isEmpty {
+            suggestions.record([LearnedFix(heard: "get hub", written: "GitHub"),
+                                LearnedFix(heard: "super base", written: "Supabase")],
+                               ruleset: dictionary.ruleset)
         }
     }
 }
