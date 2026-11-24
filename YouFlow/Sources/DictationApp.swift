@@ -271,7 +271,12 @@ enum MenuDump {
             controller.menuNeedsUpdate(menu)
             print("[\(title)]")
             for item in menu.items {
-                print("    \(item.isSeparatorItem ? "---" : (item.state == .on ? "✓ " : "  ") + item.title)")
+                let mask = item.keyEquivalentModifierMask
+                let modifiers = (mask.contains(.control) ? "⌃" : "") + (mask.contains(.option) ? "⌥" : "")
+                    + (mask.contains(.command) ? "⌘" : "")
+                let shortcut = item.keyEquivalent.isEmpty ? "" : "  \(modifiers)\(item.keyEquivalent.uppercased())"
+                let disabled = item.action != nil && !item.isEnabled ? "  (disabled)" : ""
+                print("    \(item.isSeparatorItem ? "---" : (item.state == .on ? "✓ " : "  ") + item.title)\(shortcut)\(disabled)")
             }
         }
         dump("status menu")

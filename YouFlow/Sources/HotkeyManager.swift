@@ -421,3 +421,93 @@ final class HotkeyManager {
     }
 }
 
+// MARK: - Second shortcut: paste last dictation
+
+/// A global shortcut that fires once per press, independent of the
+/// push-to-talk trigger: ⌃⌥V, "paste the last dictation again".
+///
+/// Registered with Carbon's `RegisterEventHotKey` rather than the event tap
+/// above, on purpose: it needs no permission, never auto-repeats, the system
+/// swallows the keystroke for us, and it cannot disturb the Fn state machine
+/// or its poller. ⌃⌥V is free in the common apps (⌥⌘V and ⇧⌥⌘V are the
+/// usual "paste and match style" bindings).
+@MainActor
+final class GlobalShortcut {
+    struct Combo {
+        /// Resolved per keyboard layout at registration, like ⌘V itself.
+        let keyCode: @MainActor () -> UInt32
+        let carbonModifiers: UInt32
+        /// For menus and Settings, e.g. "⌃⌥V".
+        let symbol: String
+        /// The same combo as an NSMenuItem key equivalent.
+        let keyEquivalent: String
+        let modifierMask: NSEvent.ModifierFlags
+
+        /// ponytail: the key is fixed. Make it a setting if it ever collides.
+        static let pasteLast = Combo(
+            keyCode: { UInt32(PasteKeyResolver.keyCodeForV()) },
+            carbonModifiers: UInt32(controlKey | optionKey),
+            symbol: "\u{2303}\u{2325}V",
+            keyEquivalent: "v",
+            modifierMask: [.control, .option]
+        )
+    }
+
+    private let combo: Combo
+    private let action: () -> Void
+    private var hotKey: EventHotKeyRef?
+    private var handler: EventHandlerRef?
+    /// Tells our hot key apart from any other one this process registers.
+    private let hotKeyID = EventHotKeyID(signature: 0x55466C77 /* 'UFlw' */, id: 1)
+
+    init(_ combo: Combo, action: @escaping () -> Void) {
+        self.combo = combo
+        self.action = action
+    }
+
+    /// Returns false (and logs) when another app already owns the combo.
+    /// Safe to call repeatedly. The key code is read from the layout active
+    /// now; a layout switched later keeps the old position until relaunch.
+    @discardableResult
+    func register() -> Bool {
+        guard hotKey == nil else { return true }
+
+        if handler == nil {
+            var pressed = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+            let context = Unmanaged.passUnretained(self).toOpaque()
+            let status = InstallEventHandler(GetApplicationEventTarget(), { _, event, context in
+                guard let event, let context else { return OSStatus(eventNotHandledErr) }
+                var id = EventHotKeyID()
+                let read = GetEventParameter(
+                    event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
+                    nil, MemoryLayout<EventHotKeyID>.size, nil, &id)
+                guard read == noErr else { return OSStatus(eventNotHandledErr) }
+                // Carbon dispatches application events on the main thread.
+                return MainActor.assumeIsolated {
+                    let shortcut = Unmanaged<GlobalShortcut>.fromOpaque(context).takeUnretainedValue()
+                    guard id.signature == shortcut.hotKeyID.signature, id.id == shortcut.hotKeyID.id else {
+                        return OSStatus(eventNotHandledErr)
+                    }
+                    Log.hotkey.info("Shortcut \(shortcut.combo.symbol, privacy: .public) pressed")
+                    shortcut.action()
+                    return noErr
+                }
+            }, 1, &pressed, context, &handler)
+            guard status == noErr else {
+                Log.hotkey.error("Shortcut handler install failed (\(status, privacy: .public))")
+                return false
+            }
+        }
+
+        let status = RegisterEventHotKey(
+            combo.keyCode(), combo.carbonModifiers, hotKeyID, GetApplicationEventTarget(), 0, &hotKey)
+        guard status == noErr else {
+            hotKey = nil
+            Log.hotkey.error("Shortcut \(self.combo.symbol, privacy: .public) unavailable (\(status, privacy: .public)) — another app may own it")
+            return false
+        }
+        Log.hotkey.info("Shortcut \(self.combo.symbol, privacy: .public) registered")
+        return true
+    }
+}
+

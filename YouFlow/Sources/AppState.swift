@@ -36,11 +36,17 @@ final class AppState: ObservableObject, StatusInfoProvider {
     let transcripts = TranscriptStore()
     let dictionary = DictionaryStore()
     let settings = AppSettings()
+    let suggestions = SuggestionStore()
 
     private let hotkeyManager = HotkeyManager()
     private let engine = SpeechEngine()
     private let hud = HUDPanelController()
     private let injector = ClipboardInjector()
+    private let correctionWatcher = CorrectionWatcher()
+    private lazy var pasteLastShortcut = GlobalShortcut(.pasteLast) { [weak self] in
+        self?.pasteLastDictation()
+    }
+    private var pasteLastTask: Task<Void, Never>?
     private(set) weak var statusBarController: StatusBarController?
 
     // MARK: - Published state
@@ -114,7 +120,8 @@ final class AppState: ObservableObject, StatusInfoProvider {
         // SwiftUI does not observe nested ObservableObjects, so a new
         // transcript or dictionary edit would never redraw the window. Forward
         // their change notifications into this object's own.
-        for nested in [transcripts.objectWillChange, dictionary.objectWillChange, settings.objectWillChange] {
+        for nested in [transcripts.objectWillChange, dictionary.objectWillChange,
+                       settings.objectWillChange, suggestions.objectWillChange] {
             nested
                 .sink { [weak self] in self?.objectWillChange.send() }
                 .store(in: &cancellables)
@@ -139,6 +146,18 @@ final class AppState: ObservableObject, StatusInfoProvider {
             .dropFirst()
             .sink { [weak self] language in
                 self?.applyLanguage(language)
+            }
+            .store(in: &cancellables)
+
+        correctionWatcher.onFixes = { [weak self] fixes in
+            guard let self, self.settings.learnFromCorrections else { return }
+            self.suggestions.record(fixes, ruleset: self.dictionary.ruleset)
+        }
+        // Switched off mid-watch: stop reading the field right away.
+        settings.$learnFromCorrections
+            .dropFirst()
+            .sink { [weak self] enabled in
+                if !enabled { self?.correctionWatcher.cancel() }
             }
             .store(in: &cancellables)
     }
@@ -172,6 +191,8 @@ final class AppState: ObservableObject, StatusInfoProvider {
         // app must answer the key meanwhile ("Downloading… 40%"), not sit on
         // "Starting…".
         attemptHotkeyInstall()
+        // Needs no permission, so it works even while Input Monitoring is pending.
+        pasteLastShortcut.register()
 
         // Engine preparation only requires the microphone — decoupled from
         // event-tap permissions so speech assets download even while the user
@@ -361,6 +382,10 @@ final class AppState: ObservableObject, StatusInfoProvider {
     private static let tapAfterCapGrace: Duration = .seconds(3)
 
     private func handleTriggerDown() {
+        // The user is moving on, so whatever they fixed in the last dictation
+        // is final. Off the event-tap callback: it reads another app's field.
+        Task { [weak self] in self?.correctionWatcher.finishNow() }
+
         if settings.effectiveHotkeyMode == .toggle, sessionTask == nil,
            let cappedAt, ContinuousClock.now - cappedAt < Self.tapAfterCapGrace {
             Log.hotkey.info("Toggle tap ignored: the recording cap just stopped the session")
@@ -612,7 +637,8 @@ final class AppState: ObservableObject, StatusInfoProvider {
 
             if origin == .hotkey, let origin = originApp {
                 state = .injecting
-                _ = await injector.inject(text: finalText, origin: origin)
+                let outcome = await injector.inject(text: finalText, origin: origin)
+                watchForCorrections(after: outcome, of: finalText)
             }
             state = .ready
             SoundKit.play(.keyUp)
@@ -629,6 +655,72 @@ final class AppState: ObservableObject, StatusInfoProvider {
             SoundKit.play(.error)
             state = .error(error.localizedDescription)
         }
+    }
+}
+
+// MARK: - Paste last dictation, learning from corrections
+
+extension AppState {
+    /// Pastes the newest transcript again into whatever app is in front — for
+    /// when the first paste didn't land (an app ignored the synthetic ⌘V, or
+    /// focus moved). Bound to ⌃⌥V and the menu bar item. An error click when
+    /// there is nothing to paste, a dictation is running, or a password field
+    /// has Secure Event Input on.
+    func pasteLastDictation() {
+        permissionManager.refresh()
+        guard pasteLastTask == nil, sessionTask == nil,
+              let text = transcripts.records.first?.text,
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !IsSecureEventInputEnabled(),
+              permissionManager.state.postEventGranted else {
+            Log.app.info("Paste last dictation: nothing to paste, or not allowed right now")
+            SoundKit.play(.error)
+            return
+        }
+        pasteLastTask = Task { [weak self] in
+            await Self.waitForModifierRelease()
+            guard let self else { return }
+            defer { self.pasteLastTask = nil }
+            guard let target = NSWorkspace.shared.frontmostApplication else { return }
+            let outcome = await self.injector.inject(text: text, origin: target)
+            if case .keptOnClipboard = outcome {
+                SoundKit.play(.error)
+                return
+            }
+            SoundKit.play(.keyUp)
+            self.watchForCorrections(after: outcome, of: text)
+        }
+    }
+
+    /// The shortcut's ⌃⌥ are usually still down when it fires. A ⌘V landing
+    /// meanwhile reads as ⌃⌥⌘V in apps that check the live modifier state,
+    /// so wait for them to lift (up to a second). The short first sleep also
+    /// lets the status menu close and hand focus back to the app behind it.
+    private static func waitForModifierRelease() async {
+        try? await Task.sleep(for: .milliseconds(60))
+        let held: CGEventFlags = [.maskControl, .maskAlternate, .maskShift, .maskCommand]
+        for _ in 0..<50 {
+            if CGEventSource.flagsState(.combinedSessionState).intersection(held).isEmpty { return }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+    }
+
+    /// Starts reading the field for hand corrections when the user opted in
+    /// and the text went to the app in front. On the origin-PID route the
+    /// focused field belongs to a different app, so there is nothing to read.
+    private func watchForCorrections(after outcome: InjectionOutcome, of text: String) {
+        guard settings.learnFromCorrections, permissionManager.state.accessibilityGranted,
+              case .injected = outcome else { return }
+        correctionWatcher.begin(dictated: text)
+    }
+
+    func acceptSuggestion(_ suggestion: CorrectionSuggestion) {
+        dictionary.add(DictionaryEntry(kind: .fix, match: suggestion.heard, replacement: suggestion.written))
+        suggestions.remove(suggestion)
+    }
+
+    func dismissSuggestion(_ suggestion: CorrectionSuggestion) {
+        suggestions.dismiss(suggestion)
     }
 }
 
@@ -663,6 +755,12 @@ extension AppState {
 
     func openSettingsRequested() {
         permissionManager.openRelevantSettingsPane()
+    }
+
+    var canPasteLastDictation: Bool { !transcripts.records.isEmpty }
+
+    func pasteLastDictationRequested() {
+        pasteLastDictation()
     }
 }
 
@@ -699,6 +797,11 @@ extension AppState {
             DictionaryEntry(kind: .fix, match: "Vercell", replacement: "Vercel"),
         ] where !dictionary.entries.contains(where: { $0.match == entry.match }) {
             dictionary.add(entry)
+        }
+        if suggestions.suggestions.isEmpty {
+            suggestions.record([LearnedFix(heard: "get hub", written: "GitHub"),
+                                LearnedFix(heard: "super base", written: "Supabase")],
+                               ruleset: dictionary.ruleset)
         }
     }
 }

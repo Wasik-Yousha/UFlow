@@ -306,10 +306,227 @@ enum CorrectionEngine {
             assert(got == expected, "banglish: \(input) -> \(got)")
         }
 
+        // Learning from corrections: (field after paste, field later, dictated) → fixes.
+        let ordinary: Set = ["daily", "weekly", "there", "their", "great", "awesome", "it's", "its"]
+        func learned(_ before: String, _ after: String, _ dictated: String) -> [LearnedFix] {
+            CorrectionLearner.suggestions(before: before, after: after, dictated: dictated,
+                                          isOrdinaryWord: ordinary.contains)
+        }
+        let said = "I use cloud code daily."
+        let fixed = [LearnedFix(heard: "cloud code", written: "Claude Code")]
+        for (before, after, expected) in [
+            // The example: the neighbour that only changed case joins the fix.
+            ("Notes: \(said)", "Notes: I use Claude Code daily.", fixed),
+            // Found inside a field the user also edited elsewhere, and typed on after.
+            ("Dear team, \(said)", "Hi all, I use Claude Code daily. More later.", fixed),
+            // Two words merged into one.
+            ("We deploy on super base today", "We deploy on Supabase today",
+             [LearnedFix(heard: "super base", written: "Supabase")]),
+            // Not learnable: unchanged, casing only, punctuation only.
+            (said, said, []),
+            (said, "I use Cloud Code daily.", []),
+            (said, "I use cloud code, daily!", []),
+            // Not learnable: unrelated word, plain-English swap, added word, rewrite.
+            (said, "I use cloud code awesome.", []),
+            (said, "I use cloud code weekly.", []),
+            (said, "I use cloud code nearly daily.", []),
+            (said, "Totally different sentence here now.", []),
+        ] {
+            let dictated = before.hasSuffix(said) ? said : before
+            let got = learned(before, after, dictated)
+            assert(got == expected, "learn: \(after) -> \(got)")
+        }
+        // A one-word dictation has nothing to anchor it.
+        assert(learned("Vercell", "Vercel", "Vercell").isEmpty, "learned from an unanchored word")
+
         Log.app.info("CorrectionEngine self-check passed")
         if CommandLine.arguments.contains("--self-check") {
             print("CorrectionEngine self-check: PASS")
         }
+    }
+}
+
+// MARK: - Learning from corrections
+
+/// A word or two the user fixed by hand right after dictating: "cloud code"
+/// was pasted, "Claude Code" is what the field says now.
+struct LearnedFix: Hashable {
+    var heard: String
+    var written: String
+}
+
+/// Finds the fixes worth proposing for the dictionary by comparing the text
+/// field before and after the user had a chance to edit it. Pure — strings in,
+/// pairs out — so it is checked without a text field (see the self-check).
+///
+/// What counts: one or two dictated words replaced by one or two words that
+/// look or sound alike ("cloud" → "Claude", "super base" → "Supabase").
+/// What doesn't, because the dictionary can't or shouldn't help: casing- or
+/// punctuation-only edits, added or deleted words, unrelated rewrites
+/// ("great" → "awesome"), plain-English word swaps ("their" → "there"), and
+/// everything when most of the dictation was rewritten — that is editing,
+/// not correcting.
+enum CorrectionLearner {
+    /// ponytail: calibration knobs. Raise `minSimilarity` if suggestions are
+    /// noise, lower it if real fixes are missed. `maxChangedFraction` is where
+    /// "fixed a word" turns into "rewrote it".
+    static let minSimilarity = 0.5
+    static let maxChangedFraction = 0.5
+    static let maxFixesPerDictation = 3
+    /// A long document is only searched this many characters either side of
+    /// where the dictation was pasted.
+    static let searchMargin = 2_000
+
+    private struct Token {
+        /// The word as written, minus surrounding punctuation.
+        let text: String
+        /// What two words must share to count as unchanged.
+        let key: String
+    }
+
+    private enum Op { case same(Int, Int), changed(Int?, Int?) }
+
+    /// - Parameters:
+    ///   - before: the field right after the paste landed.
+    ///   - after: the same field once the user had time to fix things.
+    ///   - dictated: exactly what was pasted.
+    ///   - isOrdinaryWord: true for a plain dictionary word; a fix made only
+    ///     of lowercase ordinary words is a word choice, not a vocabulary gap.
+    static func suggestions(
+        before: String,
+        after: String,
+        dictated: String,
+        isOrdinaryWord: (String) -> Bool = { _ in false }
+    ) -> [LearnedFix] {
+        guard before != after else { return [] }
+        let spoken = tokens(dictated)
+        let field = tokens(window(of: after, near: before, dictated: dictated))
+        guard !spoken.isEmpty, !field.isEmpty else { return [] }
+
+        let ops = align(spoken, field)
+        // The dictation has to still be recognisably there. Also rejects a
+        // one-word dictation, which has nothing around it to anchor it.
+        let unchanged = ops.filter { if case .same = $0 { return true }; return false }.count
+        guard unchanged > 0, Double(unchanged) >= Double(spoken.count) * (1 - maxChangedFraction) else { return [] }
+
+        var fixes: [LearnedFix] = []
+        var index = 0
+        while index < ops.count {
+            guard case .changed = ops[index] else { index += 1; continue }
+            var end = index
+            while end + 1 < ops.count, case .changed = ops[end + 1] { end += 1 }
+            defer { index = end + 1 }
+
+            var heard: [Int] = [], written: [Int] = []
+            for case .changed(let i, let j) in ops[index...end] {
+                if let i { heard.append(i) }
+                if let j { written.append(j) }
+            }
+            guard (1...2).contains(heard.count), (1...2).contains(written.count) else { continue }
+
+            let heardKey = heard.map { spoken[$0].key }.joined()
+            let writtenKey = written.map { field[$0].key }.joined()
+            let heardLetters = lettersOnly(heardKey), writtenLetters = lettersOnly(writtenKey)
+            guard !heardLetters.isEmpty, !writtenLetters.isEmpty else { continue }
+            // "its" → "it's": punctuation inside a word, not a new word. A
+            // regrouping ("next JS" → "Next.js") changes the word count and stays.
+            if heardLetters == writtenLetters, heard.count == written.count { continue }
+            guard similarity(heardLetters, writtenLetters) >= minSimilarity else { continue }
+            guard !written.allSatisfy({ field[$0].text == field[$0].key && isOrdinaryWord(field[$0].text) }) else { continue }
+
+            // A neighbour that only changed case belongs to the same name:
+            // "cloud code" → "Claude Code" is one fix, and far safer than
+            // rewriting every "cloud".
+            if index > 0, case .same(let i, let j) = ops[index - 1], spoken[i].text != field[j].text {
+                heard.insert(i, at: 0); written.insert(j, at: 0)
+            }
+            if end + 1 < ops.count, case .same(let i, let j) = ops[end + 1], spoken[i].text != field[j].text {
+                heard.append(i); written.append(j)
+            }
+
+            let fix = LearnedFix(
+                heard: heard.map { spoken[$0].text }.joined(separator: " "),
+                written: written.map { field[$0].text }.joined(separator: " "))
+            if !fixes.contains(fix) { fixes.append(fix) }
+        }
+        return Array(fixes.prefix(maxFixesPerDictation))
+    }
+
+    private static func tokens(_ text: String) -> [Token] {
+        let edges = CharacterSet.punctuationCharacters.union(.symbols)
+        return text.split(whereSeparator: \.isWhitespace).compactMap { raw in
+            let word = raw.replacingOccurrences(of: "\u{2019}", with: "'").trimmingCharacters(in: edges)
+            return word.isEmpty ? nil : Token(text: word, key: word.lowercased())
+        }
+    }
+
+    private static func lettersOnly(_ s: String) -> String {
+        String(s.unicodeScalars.filter(CharacterSet.alphanumerics.contains))
+    }
+
+    /// Spelling and sound, averaged: either alone lets through pairs like
+    /// "daily"/"weekly", which merely share a few letters or a crude sound key.
+    private static func similarity(_ a: String, _ b: String) -> Double {
+        let spelling = EnglishSpelling.similarity(a, b)
+        let ka = EnglishSpelling.key(a), kb = EnglishSpelling.key(b)
+        // Non-Latin script has no sound key; spelling is all there is.
+        guard !ka.isEmpty, !kb.isEmpty else { return spelling }
+        return (spelling + EnglishSpelling.similarity(ka, kb)) / 2
+    }
+
+    /// The part of a long field worth aligning against: around where the
+    /// dictation sat right after the paste. Short fields are used whole.
+    private static func window(of after: String, near before: String, dictated: String) -> String {
+        let text = after as NSString
+        guard text.length > (dictated as NSString).length + 2 * searchMargin else { return after }
+        let at = (before as NSString).range(of: dictated, options: .backwards)
+        // A long document the dictation can't be found in: too little to go on.
+        guard at.location != NSNotFound else { return "" }
+        let start = max(0, at.location - searchMargin)
+        let end = min(text.length, at.location + at.length + searchMargin)
+        return text.substring(with: NSRange(location: start, length: end - start))
+    }
+
+    /// Word-level edit alignment of the whole dictation against any stretch
+    /// of the field (text before and after the dictation is free to skip).
+    /// A substitution costs a little less than a gap, so a fixed word lines
+    /// up with its replacement instead of reading as a deletion plus an
+    /// unrelated insertion. A match earns credit rather than costing nothing,
+    /// or at the end of the dictation "daily" → "nearly daily" would read as
+    /// "daily" replaced by "nearly", the real "daily" left in the free tail.
+    private static func align(_ spoken: [Token], _ field: [Token]) -> [Op] {
+        let n = spoken.count, m = field.count, width = m + 1
+        let match = -1.0, substitution = 0.9, gap = 1.0
+        var cost = [Double](repeating: 0, count: (n + 1) * width)
+        // 0 diagonal, 1 dictated word dropped, 2 field word added.
+        var move = [UInt8](repeating: 0, count: (n + 1) * width)
+        for i in 1...n {
+            cost[i * width] = Double(i) * gap
+            move[i * width] = 1
+            for j in 1...m {
+                let same = spoken[i - 1].key == field[j - 1].key
+                var best = cost[(i - 1) * width + j - 1] + (same ? match : substitution), step: UInt8 = 0
+                if cost[(i - 1) * width + j] + gap < best { best = cost[(i - 1) * width + j] + gap; step = 1 }
+                if cost[i * width + j - 1] + gap < best { best = cost[i * width + j - 1] + gap; step = 2 }
+                cost[i * width + j] = best
+                move[i * width + j] = step
+            }
+        }
+        var j = (0...m).min { cost[n * width + $0] < cost[n * width + $1] } ?? m
+        var i = n
+        var ops: [Op] = []
+        while i > 0 {
+            switch move[i * width + j] {
+            case 0:
+                ops.append(spoken[i - 1].key == field[j - 1].key ? .same(i - 1, j - 1) : .changed(i - 1, j - 1))
+                i -= 1; j -= 1
+            case 1:
+                ops.append(.changed(i - 1, nil)); i -= 1
+            default:
+                ops.append(.changed(nil, j - 1)); j -= 1
+            }
+        }
+        return ops.reversed()
     }
 }
 
