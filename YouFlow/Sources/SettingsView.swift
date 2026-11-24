@@ -153,8 +153,9 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 460)
-        .fixedSize(horizontal: false, vertical: true)
+        // Fixed height, scrolling: the full form is taller than a laptop
+        // screen, and a window sized to fit it left the bottom unreachable.
+        .frame(width: 460, height: 640)
     }
 }
 
@@ -166,7 +167,8 @@ private struct CleanupSection: View {
     var body: some View {
         Section {
             Toggle("Clean up what I say", isOn: Binding(
-                get: { app.settings.cleanupEnabled },
+                // Shown off until the model is installed: it can't run before.
+                get: { app.settings.cleanupEnabled && cleanup.isReady },
                 set: { app.settings.cleanupEnabled = $0 }
             ))
             .disabled(!cleanup.isReady)

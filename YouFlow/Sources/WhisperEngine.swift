@@ -333,9 +333,14 @@ final class WhisperEngine: @unchecked Sendable {
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
         var hasher = SHA256()
-        while let chunk = try handle.read(upToCount: 8 << 20), !chunk.isEmpty {
+        // One pool per chunk: FileHandle's Data is autoreleased, and without
+        // this the whole model stays resident until the loop ends (~600 MB
+        // peak; the same pattern measured 4.6 GB on the clean-up model).
+        while try autoreleasepool(invoking: {
+            guard let chunk = try handle.read(upToCount: 8 << 20), !chunk.isEmpty else { return false }
             hasher.update(data: chunk)
-        }
+            return true
+        }) {}
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 }

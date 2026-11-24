@@ -230,9 +230,29 @@ enum Snapshot {
         Task {
             // Let the window lay out, load fonts, and settle its animations.
             try? await Task.sleep(for: .seconds(2))
-            capture(to: path)
+            if ProcessInfo.processInfo.environment["UFLOW_SNAPSHOT_TAB"] == "settings" {
+                captureSettings(to: path)
+            } else {
+                capture(to: path)
+            }
             NSApp.terminate(nil)
         }
+    }
+
+    /// Settings renders in its own scene; draw the view directly instead.
+    @MainActor
+    private static func captureSettings(to path: String) {
+        let host = NSHostingView(rootView: SettingsView().environmentObject(AppState.shared))
+        host.appearance = NSApp.appearance
+        let size = host.fittingSize
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled],
+                              backing: .buffered, defer: false)
+        window.contentView = host
+        host.layoutSubtreeIfNeeded()
+        guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return }
+        host.cacheDisplay(in: host.bounds, to: rep)
+        try? rep.representation(using: .png, properties: [:])?.write(to: URL(filePath: path))
+        Log.app.info("Settings snapshot written")
     }
 
     @MainActor
