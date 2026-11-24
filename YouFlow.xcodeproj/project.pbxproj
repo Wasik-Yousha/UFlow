@@ -34,6 +34,10 @@
 		A10000000000000000000040 /* whisper.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000000000040 /* whisper.xcframework */; };
 		A10000000000000000000041 /* whisper.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000000000040 /* whisper.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		A10000000000000000000042 /* WhisperEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000041 /* WhisperEngine.swift */; };
+		A100000000000000000000B0 /* llama.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A200000000000000000000B0 /* llama.xcframework */; };
+		A100000000000000000000B1 /* llama.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = A200000000000000000000B0 /* llama.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		A100000000000000000000B2 /* LocalLLM.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000B1 /* LocalLLM.swift */; };
+		A100000000000000000000B3 /* LlamaBridge.c in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000B2 /* LlamaBridge.c */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -66,6 +70,10 @@
 		A20000000000000000000016 /* NamePlate.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = NamePlate.png; sourceTree = "<group>"; };
 		A20000000000000000000040 /* whisper.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = whisper.xcframework; sourceTree = "<group>"; };
 		A20000000000000000000041 /* WhisperEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperEngine.swift; sourceTree = "<group>"; };
+		A200000000000000000000B0 /* llama.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = llama.xcframework; sourceTree = "<group>"; };
+		A200000000000000000000B1 /* LocalLLM.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalLLM.swift; sourceTree = "<group>"; };
+		A200000000000000000000B2 /* LlamaBridge.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = LlamaBridge.c; sourceTree = "<group>"; };
+		A200000000000000000000B3 /* LlamaBridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LlamaBridge.h; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -76,6 +84,7 @@
 			dstSubfolderSpec = 10;
 			files = (
 				A10000000000000000000041 /* whisper.xcframework in Embed Frameworks */,
+				A100000000000000000000B1 /* llama.xcframework in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -88,6 +97,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000000000000000000040 /* whisper.xcframework in Frameworks */,
+				A100000000000000000000B0 /* llama.xcframework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -138,6 +148,9 @@
 				A20000000000000000000004 /* HotkeyManager.swift */,
 				A20000000000000000000005 /* SpeechEngine.swift */,
 				A20000000000000000000041 /* WhisperEngine.swift */,
+				A200000000000000000000B1 /* LocalLLM.swift */,
+				A200000000000000000000B2 /* LlamaBridge.c */,
+				A200000000000000000000B3 /* LlamaBridge.h */,
 				A20000000000000000000006 /* HUDPanel.swift */,
 				A20000000000000000000007 /* ClipboardInjector.swift */,
 				A20000000000000000000008 /* StatusBarController.swift */,
@@ -165,6 +178,7 @@
 			isa = PBXGroup;
 			children = (
 				A20000000000000000000040 /* whisper.xcframework */,
+				A200000000000000000000B0 /* llama.xcframework */,
 			);
 			path = Vendor;
 			sourceTree = "<group>";
@@ -256,6 +270,8 @@
 				A10000000000000000000004 /* HotkeyManager.swift in Sources */,
 				A10000000000000000000005 /* SpeechEngine.swift in Sources */,
 				A10000000000000000000042 /* WhisperEngine.swift in Sources */,
+				A100000000000000000000B2 /* LocalLLM.swift in Sources */,
+				A100000000000000000000B3 /* LlamaBridge.c in Sources */,
 				A10000000000000000000006 /* HUDPanel.swift in Sources */,
 				A10000000000000000000007 /* ClipboardInjector.swift in Sources */,
 				A10000000000000000000008 /* StatusBarController.swift in Sources */,
@@ -354,6 +370,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.youflow.dictation;
 				PRODUCT_NAME = UFlow;
 				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_OBJC_BRIDGING_HEADER = YouFlow/Sources/LlamaBridge.h;
 				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
@@ -380,6 +397,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.youflow.dictation;
 				PRODUCT_NAME = UFlow;
 				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_OBJC_BRIDGING_HEADER = YouFlow/Sources/LlamaBridge.h;
 				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
