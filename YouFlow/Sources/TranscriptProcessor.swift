@@ -529,8 +529,11 @@ enum CorrectionLearner {
         let at = (before as NSString).range(of: dictated, options: .backwards)
         // A long document the dictation can't be found in: too little to go on.
         guard at.location != NSNotFound else { return "" }
-        let start = max(0, at.location - searchMargin)
+        // `at` is an offset into the field as it was; the user may have
+        // deleted a lot above it since, so clamp to the field as it is.
+        let start = min(max(0, at.location - searchMargin), text.length)
         let end = min(text.length, at.location + at.length + searchMargin)
+        guard end > start else { return "" }
         return text.substring(with: NSRange(location: start, length: end - start))
     }
 

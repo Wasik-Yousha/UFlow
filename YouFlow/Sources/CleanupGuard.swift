@@ -349,7 +349,13 @@ enum CleanupGuard {
             let mw = out[j].strip(quotes)
             let trail = PyStr(scalars: mw.u.reversed().prefix(while: { punct.u.contains($0) }).reversed())
             var core = words[i].strip(punct)
-            if norm(mw) == norm(core) { core = mw.strip(punct) }     // casing only
+            if norm(mw) == norm(core) {                             // casing only
+                // ...but quotation marks the speaker's own text had stay.
+                let spoken = words[i]
+                let lead = PyStr(scalars: spoken.u.prefix(while: { quotes.u.contains($0) }))
+                let tail = PyStr(scalars: spoken.u.reversed().prefix(while: { quotes.u.contains($0) }).reversed())
+                core = lead + mw.strip(punct) + (spoken.u.allSatisfy { quotes.u.contains($0) } ? PyStr("") : tail)
+            }
             kept[i] = core + trail
         }
         // Deleted runs must be proven; otherwise they come back.

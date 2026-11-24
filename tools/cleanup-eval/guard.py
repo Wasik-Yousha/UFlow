@@ -98,7 +98,11 @@ def project(spoken, model_out):
             mw = out[j].strip(QUOTES)
             trail = re.sub(r"^.*?([" + PUNCT + r"]*)$", r"\1", mw)
             core = words[i].strip(PUNCT)
-            if norm(mw) == norm(core): core = mw.strip(PUNCT)    # casing only
+            if norm(mw) == norm(core):                           # casing only
+                sp = words[i]                                    # ...but the speaker's own quotes stay
+                lead = sp[:len(sp) - len(sp.lstrip(QUOTES))]
+                tail = sp[len(sp.rstrip(QUOTES)):] if sp.strip(QUOTES) else ""
+                core = lead + mw.strip(PUNCT) + tail
             kept[i] = core + trail
     # Deleted runs must be proven; otherwise they come back.
     prot = protected(words)

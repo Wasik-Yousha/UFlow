@@ -399,10 +399,6 @@ final class AppState: ObservableObject, StatusInfoProvider {
     private static let tapAfterCapGrace: Duration = .seconds(3)
 
     private func handleTriggerDown() {
-        // The user is moving on, so whatever they fixed in the last dictation
-        // is final. Off the event-tap callback: it reads another app's field.
-        Task { [weak self] in self?.correctionWatcher.finishNow() }
-
         if settings.effectiveHotkeyMode == .toggle, sessionTask == nil,
            let cappedAt, ContinuousClock.now - cappedAt < Self.tapAfterCapGrace {
             Log.hotkey.info("Toggle tap ignored: the recording cap just stopped the session")
@@ -585,6 +581,12 @@ final class AppState: ObservableObject, StatusInfoProvider {
                     if self?.origin == .hotkey { self?.hud.push(level: CGFloat(level)) }
                 }
             }
+
+            // The user moved on, so whatever they fixed in the last dictation
+            // is final. Only now, with the microphone live: reading another
+            // app's field can block the main actor for up to a second, and
+            // before the mic started that cost the first words.
+            correctionWatcher.finishNow()
 
             // Backstop: stop as if released once the cap is reached. Cancelled
             // when this scope ends, and a no-op once the session left .recording.

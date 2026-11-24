@@ -125,7 +125,9 @@ final class CleanupController: ObservableObject {
 
     /// Load while the user is still talking, so the release doesn't wait.
     func warmUp() {
-        guard phase == .ready else { return }
+        // Under critical memory pressure clean-up is skipped anyway; loading
+        // gigabytes into a starved Mac would only make it worse.
+        guard phase == .ready, !llm.shouldSkip else { return }
         llm.preload()
     }
 }

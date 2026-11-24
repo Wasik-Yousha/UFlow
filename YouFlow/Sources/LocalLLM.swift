@@ -514,6 +514,9 @@ final class LocalLLM: @unchecked Sendable {
         func expired() -> Bool { abort.isSet || ContinuousClock.now >= deadline }
         guard !expired() else { return nil }
         guard load(), let llm else { return nil }
+        // Loading can take seconds (cold, or reloaded after a memory warning):
+        // past the deadline the dictation goes out as transcribed instead.
+        guard !expired() else { return nil }
         defer { if underWarning { free() } else { scheduleIdleUnload() } }
 
         let prompt = self.prompt(system: system, shots: shots, user: user)
