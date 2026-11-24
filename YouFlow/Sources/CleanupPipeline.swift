@@ -25,9 +25,50 @@ struct TextCleaner: Sendable {
         min(.milliseconds(2000) + .milliseconds(40) * words, .milliseconds(6000))
     }
 
+    /// Whether the model could improve `text` at all. Apple's English comes
+    /// punctuated and capitalised; a clean sentence gains nothing from the
+    /// model but a wait (~0.2–1.5 s), so it is typed at once. The model runs
+    /// when there is something it can fix: Bangla or unpunctuated text (the
+    /// Whisper route writes almost no punctuation), a repeated word, a
+    /// correction or restart word, a spoken list or command, or a dictation
+    /// long enough to want paragraphs.
+    static func mightNeedCleanup(_ text: String) -> Bool {
+        if text.unicodeScalars.contains(where: { (0x0980...0x09FF).contains($0.value) }) { return true }
+        guard let last = text.trimmingCharacters(in: .whitespacesAndNewlines).last, ".?!।".contains(last) else { return true }
+        let words = text.lowercased().split(whereSeparator: \.isWhitespace)
+            .map { $0.trimmingCharacters(in: .punctuationCharacters) }
+        // A word or phrase said twice in a row: "the the", "I think, I think".
+        for n in 1...3 where words.count >= 2 * n {
+            for i in 0...(words.count - 2 * n) where words[i..<i + n] == words[i + n..<i + 2 * n] {
+                if n == 1, ["no", "very", "so", "na", "bye", "bar", "choto"].contains(words[i]) { continue }
+                return true
+            }
+        }
+        let joined = " " + words.joined(separator: " ") + " "
+        if Self.signals.contains(where: { joined.contains(" \($0) ") }) { return true }
+        // Romanized Bangla written by the Whisper route.
+        if words.contains(where: { Self.banglishWords.contains($0) }) { return true }
+        return CleanupGuard.needsLayout(text)
+    }
+
+    /// Words and phrases that mean the model has work to do.
+    private static let signals = [
+        "no wait", "wait no", "sorry", "i mean", "actually", "scratch that", "no no", "rather", "or rather",
+        "let me rephrase", "start over", "never mind", "new line", "new paragraph",
+        "first", "firstly", "second", "secondly", "1st", "2nd", "3rd", "number one", "finally",
+        "um", "uh", "like like",
+    ]
+    private static let banglishWords: Set<String> = [
+        "mane", "acha", "achcha", "na", "ami", "tumi", "ki", "keno", "ar", "kintu", "tarpor", "bhai", "je",
+    ]
+
     func clean(_ text: String) async -> String {
         let words = text.split(whereSeparator: \.isWhitespace).count
         guard words >= Self.minimumWords, llm.isDownloaded else { return text }
+        guard Self.mightNeedCleanup(text) else {
+            Log.speech.info("Clean-up not needed — typed as transcribed")
+            return text
+        }
         guard !llm.shouldSkip else {
             Log.speech.info("Clean-up skipped: memory pressure, heat or Low Power Mode")
             return text

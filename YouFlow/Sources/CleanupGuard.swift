@@ -849,7 +849,9 @@ extension CleanupGuard {
     /// NEVER_STUTTER: "না না" is emphasis or a correction, never a slip.
     fileprivate static let neverStutter: Set<PyStr> = ["no", "very", "অনেক", "খুব", "না"]
     /// Q_BN: Bangla question words (anywhere in the sentence).
-    fileprivate static let qBN: Set<PyStr> = ["কই", "কখন", "কত", "কয়টা", "কাকে", "কার", "কি", "কিভাবে", "কিসের", "কী", "কীভাবে", "কে", "কেন", "কেনো", "কেমন", "কোথায়", "কোন", "কোনটা", "কোনো", "কোনোদিন", "ক্যান", "জীবনে", "তাই", "নাকি"]
+    fileprivate static let qBN: Set<PyStr> = ["কই", "কখন", "কত", "কয়টা", "কাকে", "কার", "কি", "কিভাবে", "কিসের", "কী", "কীভাবে", "কে", "কেন", "কেনো", "কেমন", "কোথায়", "কোন", "কোনটা", "কোনো", "কোনোদিন", "ক্যান", "জীবনে", "তাই", "নাকি",
+        // spellings Whisper writes too
+        "কোনদিন", "কখনো", "কখনোই", "কবে"]
     /// Q_EN_START: English question openers (first word).
     fileprivate static let qENStart: Set<PyStr> = ["am", "are", "aren't", "can", "can't", "could", "couldn't", "did", "didn't", "do", "does", "doesn't", "don't", "has", "have", "how", "is", "isn't", "may", "shall", "should", "shouldn't", "was", "were", "what", "when", "where", "which", "who", "why", "will", "won't", "would", "wouldn't"]
     /// ORDINAL

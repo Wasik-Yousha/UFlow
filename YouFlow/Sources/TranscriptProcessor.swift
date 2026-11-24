@@ -255,6 +255,11 @@ enum CorrectionEngine {
         let dash = EnglishSpelling.apply(to: "please check the dashbord আর আমাকে জানাও",
                                          apple: words([("Please", 1), ("check", 1), ("the", 0.99), ("dashboard.", 0.95)]))
         assert(dash == "Please check the dashboard আর আমাকে জানাও", "span across Bangla: \(dash)")
+        let hey = EnglishSpelling.apply(to: "হে how are you কেমন আছো",
+                                        apple: words([("Hey,", 0.9), ("how", 0.97), ("are", 0.99), ("you?", 0.94),
+                                                      ("Camo", 0.67), ("nacho.", 0.78)]),
+                                        realEnglish: ["hey", "how", "are", "you", "camo", "nacho"])
+        assert(hey == "Hey how are you কেমন আছো", "English word in Bangla letters: \(hey)")
         assert(EnglishSpelling.apply(to: "send the reprt", apple: words([("Send", 0.3), ("the", 0.3), ("report", 0.3)]))
                == "send the reprt", "unsure apple word used")
         assert(EnglishSpelling.apply(to: "please send the reprt.", apple: words([("Please", 0.9), ("send", 0.9), ("the", 0.9), ("report", 0.9)]))
@@ -287,6 +292,18 @@ enum CorrectionEngine {
                     assert(!SpeechEngine.isShortEnglish(no), "Bangla read as short English: \(no)")
                 }
             }
+        }
+
+        // Clean-up runs only when there is something to fix.
+        for clean in ["Please send me the updated proposal by Friday afternoon.",
+                      "What time does the store close today?",
+                      "Can you check the invoice and tell me if anything is missing?"] {
+            assert(!TextCleaner.mightNeedCleanup(clean), "clean English sent to the model: \(clean)")
+        }
+        for messy in ["I think, I think we should wait.", "Send it to John, no wait, send it to Sarah.",
+                      "There are 3 steps. 1st download the app.", "ami kalke office e jabo",
+                      "he how are you kemon acho", "আমি কালকে যাবো", "please check the dashboard"] {
+            assert(TextCleaner.mightNeedCleanup(messy), "messy text skipped: \(messy)")
         }
 
         // Silence gate: a short word in a long hold is speech; faint hiss and
@@ -786,9 +803,21 @@ enum EnglishSpelling {
                     // "meathing" → "meeting" (Apple 0.49 inside Bangla).
                     || (word.confidence >= Self.closeMatchConfidence && sim >= Self.closeMatch)
             }
+            // One English word Whisper wrote in Bangla letters inside English
+            // ("হে how are you" for "Hey, how are you"): Apple's word when it
+            // is very sure, it sounds the same, and English stands beside it.
+            let englishInBangla: Bool = {
+                guard let span = step.span, span.h == 1, span.a == 1, !isLatinWord(h[step.i]) else { return false }
+                let word = apple[step.j]
+                let bare = word.text.trimmingCharacters(in: .punctuationCharacters).lowercased()
+                let besideEnglish = (step.i > 0 && isLatinWord(h[step.i - 1]))
+                    || (step.i + 1 < n && isLatinWord(h[step.i + 1]))
+                return word.confidence >= Self.englishInBanglaConfidence && span.sim >= Self.closeMatch
+                    && realEnglish.contains(bare) && besideEnglish
+            }()
             if let span = step.span,
                span.sim >= minSimilarity,
-               h[step.i..<step.i + span.h].allSatisfy(isLatinWord),
+               englishInBangla || h[step.i..<step.i + span.h].allSatisfy(isLatinWord),
                apple[step.j..<step.j + span.a].allSatisfy({ sure($0, span.sim) }) {
                 let words = apple[step.j..<step.j + span.a].enumerated().map { offset, word -> String in
                     let bare = word.text.trimmingCharacters(in: .punctuationCharacters)
@@ -822,6 +851,9 @@ enum EnglishSpelling {
         guard startsAppleSentence, rest == rest.lowercased() else { return word }
         return word.lowercased()
     }
+
+    /// Bar for replacing a Bangla-letter word with Apple's English one.
+    static let englishInBanglaConfidence = 0.85
 
     /// Bar for using Apple's spelling of a word that sounds nearly the same.
     static let closeMatchConfidence = 0.45

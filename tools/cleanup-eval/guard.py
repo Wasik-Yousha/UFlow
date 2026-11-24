@@ -192,7 +192,9 @@ def main():
 
 # --- question marks: the model may only ask when the sentence asks ---
 Q_BN = {"কি", "কী", "কেন", "কোথায়", "কখন", "কে", "কাকে", "কার", "কেমন", "কত", "কিভাবে", "কীভাবে", "কোন",
-        "কোনটা", "কোনো", "নাকি", "কোনোদিন", "জীবনে", "তাই", "কেনো", "কই", "ক্যান", "কিসের", "কয়টা"}
+        "কোনটা", "কোনো", "নাকি", "কোনোদিন", "জীবনে", "তাই", "কেনো", "কই", "ক্যান", "কিসের", "কয়টা",
+        # spellings Whisper writes too
+        "কোনদিন", "কখনো", "কখনোই", "কবে"}
 Q_EN_START = {"who", "what", "when", "where", "why", "how", "which", "can", "could", "would", "will", "should",
               "do", "does", "did", "is", "are", "was", "were", "have", "has", "may", "shall", "am", "isn't", "aren't",
               "don't", "doesn't", "didn't", "won't", "can't", "shouldn't", "wouldn't", "couldn't"}
