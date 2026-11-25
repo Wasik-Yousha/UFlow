@@ -97,6 +97,9 @@ def project(spoken, model_out):
             # '"Start a new paragraph after the quote."').
             mw = out[j].strip(QUOTES)
             trail = re.sub(r"^.*?([" + PUNCT + r"]*)$", r"\1", mw)
+            # A "?" the speech engine wrote came from the speaker's voice
+            # (rising pitch); the model replacing it with "." loses that.
+            if words[i].endswith("?") and not trail.endswith("?"): trail = "?"
             core = words[i].strip(PUNCT)
             if norm(mw) == norm(core):                           # casing only
                 sp = words[i]                                    # ...but the speaker's own quotes stay
@@ -189,7 +192,9 @@ def main():
 
 # --- question marks: the model may only ask when the sentence asks ---
 Q_BN = {"কি", "কী", "কেন", "কোথায়", "কখন", "কে", "কাকে", "কার", "কেমন", "কত", "কিভাবে", "কীভাবে", "কোন",
-        "কোনটা", "কোনো", "নাকি", "কোনোদিন", "জীবনে", "তাই", "কেনো", "কই", "ক্যান", "কিসের", "কয়টা"}
+        "কোনটা", "কোনো", "নাকি", "কোনোদিন", "জীবনে", "তাই", "কেনো", "কই", "ক্যান", "কিসের", "কয়টা",
+        # spellings Whisper writes too
+        "কোনদিন", "কখনো", "কখনোই", "কবে"}
 Q_EN_START = {"who", "what", "when", "where", "why", "how", "which", "can", "could", "would", "will", "should",
               "do", "does", "did", "is", "are", "was", "were", "have", "has", "may", "shall", "am", "isn't", "aren't",
               "don't", "doesn't", "didn't", "won't", "can't", "shouldn't", "wouldn't", "couldn't"}
@@ -199,7 +204,10 @@ def fix_questions(text):
     for p in parts:
         if p.endswith("?"):
             ws = [norm(w) for w in p.split()]
-            asks = bool(set(ws) & Q_BN) or (ws and ws[0] in Q_EN_START) or "right" in ws[-1:] or "okay" in ws[-1:]
+            # A question can start after a comma: "Hey, how are you?"
+            starts = [norm(c.split()[0]) for c in p.split(",") if c.split()]
+            asks = bool(set(ws) & Q_BN) or (ws and ws[0] in Q_EN_START) or "right" in ws[-1:] or "okay" in ws[-1:] \
+                or any(s in Q_EN_START for s in starts)
             if not asks:
                 p = p[:-1] + ("।" if re.search(r"[ঀ-৿]", p) else ".")
         if p.endswith("।") and not re.search(r"[\u0980-\u09FF]", p):
@@ -235,7 +243,9 @@ LAYOUT_SHOTS = [
 ]
 
 ORDINAL = {"first": 1, "firstly": 1, "second": 2, "secondly": 2, "third": 3, "thirdly": 3, "fourth": 4,
-           "fourthly": 4, "fifth": 5, "fifthly": 5, "sixth": 6, "sixthly": 6, "seventh": 7}
+           "fourthly": 4, "fifth": 5, "fifthly": 5, "sixth": 6, "sixthly": 6, "seventh": 7,
+           # Apple's English model writes spoken ordinals as digits
+           "1st": 1, "2nd": 2, "3rd": 3, "4th": 4, "5th": 5, "6th": 6, "7th": 7}
 CARD = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
 CARD.update({str(k): k for k in range(1, 11)})
 LAST_W = {"finally", "lastly"}

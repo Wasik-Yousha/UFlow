@@ -95,6 +95,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             CleanupReplay.dumpPrompts()
             exit(0)
         }
+        if let flag = CommandLine.arguments.firstIndex(of: "--spell"), flag + 2 < CommandLine.arguments.count {
+            // --spell "<whisper text>" "word@conf word@conf …" → EnglishSpelling result
+            let apple = CommandLine.arguments[flag + 2].split(separator: " ").map { token -> AppleWord in
+                let parts = token.split(separator: "@")
+                return AppleWord(text: String(parts[0]), confidence: Double(parts.last ?? "0") ?? 0)
+            }
+            print(EnglishSpelling.apply(to: CommandLine.arguments[flag + 1], apple: apple, realEnglish: Set(CommandLine.arguments.dropFirst(flag + 3))))
+            exit(0)
+        }
         if let flag = CommandLine.arguments.firstIndex(of: "--cleanup-run") {
             CleanupRun.run(Array(CommandLine.arguments[(flag + 1)...]))
             return
@@ -336,6 +345,13 @@ enum FileTranscription {
         Task {
             let engine = SpeechEngine()
             if let mode = args.first.flatMap(SpeechLanguage.init(rawValue:)) { await engine.setLanguage(mode) }
+            // Same clean-up the app would use (CleanupController picks the
+            // best installed model for this Mac), unless UFLOW_CLEANUP=off.
+            if ProcessInfo.processInfo.environment["UFLOW_CLEANUP"] != "off",
+               let active = CleanupController().active {
+                await engine.setCleaner(TextCleaner(llm: active))
+                _ = await active.loadNow()
+            }
             do {
                 try await engine.prepare()
                 for path in args.dropFirst() {

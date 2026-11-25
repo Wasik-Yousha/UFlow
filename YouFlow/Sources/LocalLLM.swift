@@ -15,11 +15,27 @@ enum CleanupModel: String, CaseIterable, Sendable {
     /// < 16 GB → E2B; 16 GB up to 18 GB → E4B; 18 GB and up → 12B.
     /// `physicalMemory` is exact (a 16 GB Mac reports 17_179_869_184), so
     /// this compares in GiB.
-    static func forThisMac() -> CleanupModel {
+    static func forThisMac() -> CleanupModel { choicesForThisMac()[0] }
+
+    /// The models offered on this Mac, default first. Under 16 GB: E2B.
+    /// 16 GB and up: E4B. 18 GB and up may also pick 12B — measured on an
+    /// M4 Pro it cleans Bangla best (35/36 vs 32/36) but takes about twice
+    /// as long per word (~42 ms) and lays out English lists less often
+    /// (20/41 vs 39/41), so the faster E4B stays the default.
+    static func choicesForThisMac() -> [CleanupModel] {
         let gib = Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824
-        if gib < 16 { return .e2b }
-        if gib < 18 { return .e4b }
-        return .e12b
+        if gib < 16 { return [.e2b] }
+        if gib < 18 { return [.e4b] }
+        return [.e4b, .e12b]
+    }
+
+    /// One line for the Settings picker.
+    var tradeoff: String {
+        switch self {
+        case .e2b: "fast, light on memory"
+        case .e4b: "fast, best for English"
+        case .e12b: "best for Bangla, slower"
+        }
     }
 
     var displayName: String {

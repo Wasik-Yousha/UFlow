@@ -347,7 +347,10 @@ enum CleanupGuard {
             // only its casing and trailing punctuation are (E4B once returned
             // "\"Start a new paragraph after the quote.\"").
             let mw = out[j].strip(quotes)
-            let trail = PyStr(scalars: mw.u.reversed().prefix(while: { punct.u.contains($0) }).reversed())
+            var trail = PyStr(scalars: mw.u.reversed().prefix(while: { punct.u.contains($0) }).reversed())
+            // A "?" the speech engine wrote came from the speaker's voice
+            // (rising pitch); the model replacing it with "." loses that.
+            if words[i].last == "?" && trail.last != "?" { trail = "?" }
             var core = words[i].strip(punct)
             if norm(mw) == norm(core) {                             // casing only
                 // ...but quotation marks the speaker's own text had stay.
@@ -446,8 +449,11 @@ enum CleanupGuard {
             var p = part
             if p.last == "?" {
                 let ws = p.split().map(norm)
+                // A question can start after a comma: "Hey, how are you?"
+                let clauseStarts = p.split(",").compactMap { $0.split().first.map(norm) }
                 let asks = !Set(ws).isDisjoint(with: qBN)
                     || (!ws.isEmpty && qENStart.contains(ws[0]))
+                    || clauseStarts.contains(where: qENStart.contains)
                     || ws.last == "right" || ws.last == "okay"
                 if !asks {
                     p = p.dropLast() + (p.hasBangla ? "।" : ".")
@@ -843,11 +849,15 @@ extension CleanupGuard {
     /// NEVER_STUTTER: "না না" is emphasis or a correction, never a slip.
     fileprivate static let neverStutter: Set<PyStr> = ["no", "very", "অনেক", "খুব", "না"]
     /// Q_BN: Bangla question words (anywhere in the sentence).
-    fileprivate static let qBN: Set<PyStr> = ["কই", "কখন", "কত", "কয়টা", "কাকে", "কার", "কি", "কিভাবে", "কিসের", "কী", "কীভাবে", "কে", "কেন", "কেনো", "কেমন", "কোথায়", "কোন", "কোনটা", "কোনো", "কোনোদিন", "ক্যান", "জীবনে", "তাই", "নাকি"]
+    fileprivate static let qBN: Set<PyStr> = ["কই", "কখন", "কত", "কয়টা", "কাকে", "কার", "কি", "কিভাবে", "কিসের", "কী", "কীভাবে", "কে", "কেন", "কেনো", "কেমন", "কোথায়", "কোন", "কোনটা", "কোনো", "কোনোদিন", "ক্যান", "জীবনে", "তাই", "নাকি",
+        // spellings Whisper writes too
+        "কোনদিন", "কখনো", "কখনোই", "কবে"]
     /// Q_EN_START: English question openers (first word).
     fileprivate static let qENStart: Set<PyStr> = ["am", "are", "aren't", "can", "can't", "could", "couldn't", "did", "didn't", "do", "does", "doesn't", "don't", "has", "have", "how", "is", "isn't", "may", "shall", "should", "shouldn't", "was", "were", "what", "when", "where", "which", "who", "why", "will", "won't", "would", "wouldn't"]
     /// ORDINAL
-    fileprivate static let ordinal: [PyStr: Int] = ["first": 1, "firstly": 1, "second": 2, "secondly": 2, "third": 3, "thirdly": 3, "fourth": 4, "fourthly": 4, "fifth": 5, "fifthly": 5, "sixth": 6, "sixthly": 6, "seventh": 7]
+    fileprivate static let ordinal: [PyStr: Int] = ["first": 1, "firstly": 1, "second": 2, "secondly": 2, "third": 3, "thirdly": 3, "fourth": 4, "fourthly": 4, "fifth": 5, "fifthly": 5, "sixth": 6, "sixthly": 6, "seventh": 7,
+        // Apple's English model writes spoken ordinals as digits
+        "1st": 1, "2nd": 2, "3rd": 3, "4th": 4, "5th": 5, "6th": 6, "7th": 7]
     /// CARD
     fileprivate static let card: [PyStr: Int] = ["1": 1, "one": 1, "2": 2, "two": 2, "3": 3, "three": 3, "4": 4, "four": 4, "5": 5, "five": 5, "6": 6, "six": 6, "7": 7, "seven": 7, "8": 8, "eight": 8, "9": 9, "nine": 9, "10": 10, "ten": 10]
     /// LAST_W

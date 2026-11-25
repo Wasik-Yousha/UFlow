@@ -155,7 +155,16 @@ struct SettingsView: View {
         .formStyle(.grouped)
         // Fixed height, scrolling: the full form is taller than a laptop
         // screen, and a window sized to fit it left the bottom unreachable.
-        .frame(width: 460, height: 640)
+        .frame(width: 460, height: formHeight)
+        .fixedSize(horizontal: false, vertical: formHeight == nil)
+    }
+
+    /// 640 pt and scrolling; a debug snapshot can ask for the whole form.
+    private var formHeight: CGFloat? {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["UFLOW_SNAPSHOT_FULL"] != nil { return nil }
+        #endif
+        return 640
     }
 }
 
@@ -173,15 +182,32 @@ private struct CleanupSection: View {
             ))
             .disabled(!cleanup.isReady)
 
-            LabeledContent("Model") {
-                Text("\(cleanup.model.displayName) · \(cleanup.sizeText)")
-                    .monospacedDigit()
+            if cleanup.choices.count > 1 {
+                Picker("Model", selection: Binding(
+                    get: { cleanup.model },
+                    set: { cleanup.choose($0) }
+                )) {
+                    ForEach(cleanup.choices, id: \.self) { choice in
+                        Text("\(choice.displayName) — \(choice.tradeoff)").tag(choice)
+                    }
+                }
+                LabeledContent("Download size") { Text(cleanup.sizeText).monospacedDigit() }
+            } else {
+                LabeledContent("Model") {
+                    Text("\(cleanup.model.displayName) · \(cleanup.sizeText)")
+                        .monospacedDigit()
+                }
             }
 
             switch cleanup.phase {
             case .notDownloaded:
                 LabeledContent("Status") {
                     Button("Download") { cleanup.startDownload() }
+                }
+                if let standIn = cleanup.standIn {
+                    Text("Using \(standIn.displayName), already on this Mac, until this one is downloaded.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
                 }
             case .downloading(let fraction):
                 LabeledContent("Downloading") {
@@ -211,7 +237,7 @@ private struct CleanupSection: View {
         } footer: {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Removes stutters, false starts and corrected slips (\u{201C}at five, no sorry, six\u{201D} → \u{201C}at six\u{201D}), adds punctuation, and turns spoken lists into numbered ones. It only ever deletes words it can prove were slips — anything else stays exactly as you said it.")
-                Text("Runs on your Mac. Picked for your \(cleanup.memoryText) of memory: 8 GB Macs get Gemma 4 E2B, 16 GB get E4B, 18 GB and up get 12B. Downloaded once from Hugging Face and checked; it loads while you talk and unloads when idle or when memory runs low.")
+                Text("Runs on your Mac. Picked for your \(cleanup.memoryText) of memory: 8 GB Macs get Gemma 4 E2B, 16 GB get E4B, and 18 GB and up can also choose 12B. Downloaded once from Hugging Face and checked; it loads while you talk and unloads when idle or when memory runs low.")
             }
             .foregroundStyle(.secondary)
         }
